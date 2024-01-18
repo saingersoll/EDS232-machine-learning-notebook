@@ -176,12 +176,9 @@ new_pumpkins %>%
   scale_color_gradient(low = '#FCAE1E', high = '#C95B0C')
 ```
 
-*Question 3:* Is this a useful plot? Does anything about it surprise you?
+*Question 3:* Is this a useful plot? Does anything about it surprise you? How do we make it more useful? To get charts to display useful data, you usually need to group the data somehow.
 
-How do we make it more useful? To get charts to display useful data, you usually need to group the data somehow.
-
-
-
+This plot was slightly informative. It informs us of the price of pumpkins vs the days of the year and the points are color coded according to month, but it is not easy to quickly to differentiate trends using the information displayed. To no surpise, the cost of pumpkins is higher in months that pumpkins are not in season, and cheapest during their harvesting season (fall months). To improve this, I would make the x-axis by month rather than day and convert the size of the points to match the amount of pumpkins sold during that month.
 
 *Question 4:* Group the pumpkins into groups based on the month column and then find the mean price for each month. Plot the results with a bar plot.
 
@@ -231,7 +228,6 @@ Now, let's create a recipe that prepares our data for modelling by substituting 
 pumpkins_recipe <- recipe(price ~ ., data = new_pumpkins) %>% 
   step_integer(all_predictors(), zero_based = TRUE)
 
-
 # Print out the recipe
 pumpkins_recipe
 ```
@@ -279,7 +275,9 @@ cor(baked_pumpkins$package, baked_pumpkins$price)
 
 ```{r}
 #Correlation between price and other vars.
+cor(baked_pumpkins$price, baked_pumpkins$month)
 
+cor(baked_pumpkins$price, baked_pumpkins$variety)
 ```
 
 *Question 7:* Which of these three variables is most highly correlated with price? Why might this be?
@@ -291,9 +289,8 @@ Now let's visualize a correlation matrix of all the columns using the corrplot p
 library(corrplot)
 
 # Obtain correlation matrix
-corr_mat <- cor(baked_pumpkins %>% 
-                  # Drop columns that are not really informative
-                  select(-c(low_price, high_price)))
+corr_mat <- cor(baked_pumpkins) %>% 
+  select(-c(low_price, high_price))                    # Drop columns that are not really informative
 
 # Make a correlation plot between the variables
 corrplot(corr_mat, method = "shade", shade.col = NA, tl.col = "black", tl.srt = 45, addCoef.col = "black", cl.pos = "n", order = "original")
@@ -313,7 +310,7 @@ To do this, we'll first split the data. Data splitting is a key part of the mach
 ```{r}
 set.seed(123)
 # Split the data into training and test sets
-pumpkins_split <- new_pumpkins %>% 
+pumpkins_split <- baked_pumpkins %>% 
   initial_split(prop = 0.8)
 
 
