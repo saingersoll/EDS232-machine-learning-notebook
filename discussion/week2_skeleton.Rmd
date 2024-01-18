@@ -226,17 +226,27 @@ head(test_predict)
 Finally, we will calulate some metrics for preformance, using the `yardstick` package.
 
 ```{r}
+# collect testing data metrics
+train_metrics <- train_predict %>% 
+  metrics(habitat, .pred)
 
+test_metrics <- test_predict %>% 
+  metrics(habitat, .pred)
+  
 ```
 
 
 ```{r}
-
+# View train metrics
 train_metrics
+
+# rmse highly dependent on scale of observations, nice to compare to test here
+# rsq very little correlation found
+# mae mean absolute error, always lower than rmse bc no square
 ```
-
+We see our testing data metrics are better than our training metrics. This is likely because our training model truly couldn't be worse.
 ```{r}
-
+# View test metrics
 test_metrics
 ```
 
