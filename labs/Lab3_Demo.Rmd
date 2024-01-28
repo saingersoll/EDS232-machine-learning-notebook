@@ -88,7 +88,7 @@ How much improvement to our loss function as lambda changes?
 ```{r cv.glmnet}
 # Apply CV ridge regression to Ames data.  Same arguments as before to glmnet()
 # cross validation for tuning. We are going to be resampling our data by breaking it into pieces and running the multi-folds. The average of this will be our assessment of model efficiency on unseen data.
-# the defauult number of folds is 10-fold
+# the default number of folds is 10-fold
 
 # cv is telling us to use cross validation
 ridge <- cv.glmnet(
@@ -109,7 +109,7 @@ lasso <- cv.glmnet(
 # plot results
 par(mfrow = c(1, 2))
 
-# how well the model is predicting the hold out cell, mean-squared error. as lambda increaes, the MSE is increasing. We want a lambda that minimizes MSE. This is telling us where our optimal points are for MSE. The dotted lines are created by the one standard error rule. Pick the point where lambda is the most parse-harmonious (fewier variables).This is within 1 std error of the folds. The average mean squared error over the entire cross validation
+# how well the model is predicting the hold out cell, mean-squared error. as lambda increases, the MSE is increasing. We want a lambda that minimizes MSE. This is telling us where our optimal points are for MSE. The dotted lines are created by the one standard error rule. Pick the point where lambda is the most parse-harmonious (fewer variables).This is within 1 std error of the folds. The average mean squared error over the entire cross validation
 plot(ridge, main = "Ridge penalty\n\n")
 
 
