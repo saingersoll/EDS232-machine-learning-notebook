@@ -20,6 +20,7 @@ Let's explore how employee income and overtime hours worked affect likelihood of
 # load attrition df from the modeldata package
 data("attrition", package = "modeldata")
 
+# if it is ordered as a factor, and ordered=FALSE then do not determine if the levels should be in the order given
 df <- attrition %>% mutate_if(is.ordered, factor, ordered = FALSE)
 
 # Create training (70%) and test (30%) sets for the 
