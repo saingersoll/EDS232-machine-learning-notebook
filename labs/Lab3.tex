@@ -1,0 +1,540 @@
+% Options for packages loaded elsewhere
+\PassOptionsToPackage{unicode}{hyperref}
+\PassOptionsToPackage{hyphens}{url}
+%
+\documentclass[
+]{article}
+\usepackage{amsmath,amssymb}
+\usepackage{iftex}
+\ifPDFTeX
+  \usepackage[T1]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{textcomp} % provide euro and other symbols
+\else % if luatex or xetex
+  \usepackage{unicode-math} % this also loads fontspec
+  \defaultfontfeatures{Scale=MatchLowercase}
+  \defaultfontfeatures[\rmfamily]{Ligatures=TeX,Scale=1}
+\fi
+\usepackage{lmodern}
+\ifPDFTeX\else
+  % xetex/luatex font selection
+\fi
+% Use upquote if available, for straight quotes in verbatim environments
+\IfFileExists{upquote.sty}{\usepackage{upquote}}{}
+\IfFileExists{microtype.sty}{% use microtype if available
+  \usepackage[]{microtype}
+  \UseMicrotypeSet[protrusion]{basicmath} % disable protrusion for tt fonts
+}{}
+\makeatletter
+\@ifundefined{KOMAClassName}{% if non-KOMA class
+  \IfFileExists{parskip.sty}{%
+    \usepackage{parskip}
+  }{% else
+    \setlength{\parindent}{0pt}
+    \setlength{\parskip}{6pt plus 2pt minus 1pt}}
+}{% if KOMA class
+  \KOMAoptions{parskip=half}}
+\makeatother
+\usepackage{xcolor}
+\usepackage[margin=1in]{geometry}
+\usepackage{color}
+\usepackage{fancyvrb}
+\newcommand{\VerbBar}{|}
+\newcommand{\VERB}{\Verb[commandchars=\\\{\}]}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{commandchars=\\\{\}}
+% Add ',fontsize=\small' for more characters per line
+\usepackage{framed}
+\definecolor{shadecolor}{RGB}{248,248,248}
+\newenvironment{Shaded}{\begin{snugshade}}{\end{snugshade}}
+\newcommand{\AlertTok}[1]{\textcolor[rgb]{0.94,0.16,0.16}{#1}}
+\newcommand{\AnnotationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\AttributeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\BaseNTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\BuiltInTok}[1]{#1}
+\newcommand{\CharTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\CommentTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\CommentVarTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\ConstantTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\ControlFlowTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\DataTypeTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{#1}}
+\newcommand{\DecValTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\DocumentationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\ErrorTok}[1]{\textcolor[rgb]{0.64,0.00,0.00}{\textbf{#1}}}
+\newcommand{\ExtensionTok}[1]{#1}
+\newcommand{\FloatTok}[1]{\textcolor[rgb]{0.00,0.00,0.81}{#1}}
+\newcommand{\FunctionTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\ImportTok}[1]{#1}
+\newcommand{\InformationTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\newcommand{\KeywordTok}[1]{\textcolor[rgb]{0.13,0.29,0.53}{\textbf{#1}}}
+\newcommand{\NormalTok}[1]{#1}
+\newcommand{\OperatorTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\OtherTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{#1}}
+\newcommand{\PreprocessorTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textit{#1}}}
+\newcommand{\RegionMarkerTok}[1]{#1}
+\newcommand{\SpecialCharTok}[1]{\textcolor[rgb]{0.81,0.36,0.00}{\textbf{#1}}}
+\newcommand{\SpecialStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\StringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\VariableTok}[1]{\textcolor[rgb]{0.00,0.00,0.00}{#1}}
+\newcommand{\VerbatimStringTok}[1]{\textcolor[rgb]{0.31,0.60,0.02}{#1}}
+\newcommand{\WarningTok}[1]{\textcolor[rgb]{0.56,0.35,0.01}{\textbf{\textit{#1}}}}
+\usepackage{graphicx}
+\makeatletter
+\def\maxwidth{\ifdim\Gin@nat@width>\linewidth\linewidth\else\Gin@nat@width\fi}
+\def\maxheight{\ifdim\Gin@nat@height>\textheight\textheight\else\Gin@nat@height\fi}
+\makeatother
+% Scale images if necessary, so that they will not overflow the page
+% margins by default, and it is still possible to overwrite the defaults
+% using explicit options in \includegraphics[width, height, ...]{}
+\setkeys{Gin}{width=\maxwidth,height=\maxheight,keepaspectratio}
+% Set default figure placement to htbp
+\makeatletter
+\def\fps@figure{htbp}
+\makeatother
+\setlength{\emergencystretch}{3em} % prevent overfull lines
+\providecommand{\tightlist}{%
+  \setlength{\itemsep}{0pt}\setlength{\parskip}{0pt}}
+\setcounter{secnumdepth}{-\maxdimen} % remove section numbering
+\ifLuaTeX
+  \usepackage{selnolig}  % disable illegal ligatures
+\fi
+\IfFileExists{bookmark.sty}{\usepackage{bookmark}}{\usepackage{hyperref}}
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{} % add URL line breaks if available
+\urlstyle{same}
+\hypersetup{
+  pdftitle={Ingersoll\_Lab3},
+  pdfauthor={Sofia Ingersoll},
+  hidelinks,
+  pdfcreator={LaTeX via pandoc}}
+
+\title{Ingersoll\_Lab3}
+\author{Sofia Ingersoll}
+\date{2024-02-01}
+
+\begin{document}
+\maketitle
+
+\hypertarget{lab-3-predicting-the-age-of-abalone}{%
+\subsection{Lab 3: Predicting the age of
+abalone}\label{lab-3-predicting-the-age-of-abalone}}
+
+Abalones are marine snails. Their flesh is widely considered to be a
+desirable food, and is consumed raw or cooked by a variety of cultures.
+The age of abalone is determined by cutting the shell through the cone,
+staining it, and counting the number of rings through a microscope -- a
+boring and time-consuming task. Other measurements, which are easier to
+obtain, are used to predict the age.
+
+The data set provided includes variables related to the sex, physical
+dimensions of the shell, and various weight measurements, along with the
+number of rings in the shell. Number of rings is the stand-in here for
+age.
+
+\hypertarget{data-exploration}{%
+\subsubsection{Data Exploration}\label{data-exploration}}
+
+Pull the abalone data from Github and take a look at it.
+
+\hypertarget{data-splitting}{%
+\subsubsection{Data Splitting}\label{data-splitting}}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 1}}. Split the data into training and test
+  sets. Use a 70/30 training/test split.
+\end{itemize}
+
+We'll follow our text book's lead and use the caret package in our
+approach to this task. We will use the glmnet package in order to
+perform ridge regression and the lasso. The main function in this
+package is glmnet(), which can be used to fit ridge regression models,
+lasso models, and more. In particular, we must pass in an x matrix of
+predictors as well as a y outcome vector , and we do not use the y∼x
+syntax.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}{-}Split data for model{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# creating initial data split}
+\NormalTok{split }\OtherTok{\textless{}{-}} \FunctionTok{initial\_split}\NormalTok{(abdat)}
+
+\CommentTok{\# training data}
+\NormalTok{ab\_train }\OtherTok{\textless{}{-}} \FunctionTok{training}\NormalTok{(split)}
+
+\CommentTok{\# testing data}
+\NormalTok{ab\_test }\OtherTok{\textless{}{-}} \FunctionTok{testing}\NormalTok{(split)}
+\end{Highlighting}
+\end{Shaded}
+
+\hypertarget{fit-a-ridge-regression-model}{%
+\subsubsection{Fit a ridge regression
+model}\label{fit-a-ridge-regression-model}}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 2}}. Use the model.matrix() function to create
+  a predictor matrix, x, and assign the Rings variable to an outcome
+  vector, y.
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Create Predictor Matrix{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# Create training feature matrices using model.matrix() }
+\CommentTok{\# (auto encodes of categorical variables)}
+
+\CommentTok{\# for Rings, assess the relationship amongst all variables and remove }
+\CommentTok{\# the intercept variable of {-}1.}
+\NormalTok{X }\OtherTok{\textless{}{-}} \FunctionTok{model.matrix}\NormalTok{(Rings }\SpecialCharTok{\textasciitilde{}}\NormalTok{ ., }\AttributeTok{data =}\NormalTok{ ab\_train)[,}\SpecialCharTok{{-}}\DecValTok{1}\NormalTok{]      }
+
+
+\CommentTok{\# Using skim(ab\_train$Rings) in the console revealed a mean of 9.92 with }
+\CommentTok{\# a sd of 3.19. The histogram provided looked right skewed, indicating }
+\CommentTok{\# a potential need for a log transformation. Below we will apply }
+\CommentTok{\# a log transformation and run skim(Y) to test our theory.}
+
+
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Log Transform Rings{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# transform y with log() transformation}
+\NormalTok{Y }\OtherTok{\textless{}{-}} \FunctionTok{log}\NormalTok{(ab\_train}\SpecialCharTok{$}\NormalTok{Rings)}
+
+\CommentTok{\# In the Console, running skim(Y) displayed the results of the transformation.}
+\CommentTok{\# The new mean is 2.25 with a significantly better sd of 0.317.}
+\CommentTok{\# The histogram percentiles juxtaposed to skim(ab\_train$Rings) are }
+\CommentTok{\# more evenly distributed.}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 3}}. Fit a ridge model (controlled by the alpha
+  parameter) using the glmnet() function. Make a plot showing how the
+  estimated coefficients change with lambda. (Hint: You can call plot()
+  directly on the glmnet() objects).
+\end{itemize}
+
+\hypertarget{using-k-fold-cross-validation-resampling-and-tuning-our-models}{%
+\subsubsection{\texorpdfstring{Using \emph{k}-fold cross validation
+resampling and tuning our
+models}{Using k-fold cross validation resampling and tuning our models}}\label{using-k-fold-cross-validation-resampling-and-tuning-our-models}}
+
+In lecture we learned about two methods of estimating our model's
+generalization error by resampling, cross validation and bootstrapping.
+We'll use the \emph{k}-fold cross validation method in this lab. Recall
+that lambda is a tuning parameter that helps keep our model from
+over-fitting to the training data. Tuning is the process of finding the
+optima value of lamba.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}k{-}fold Cross Validation{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# fit a ridge model, passing X,Y, and alpha = 0 to glmnet()}
+\NormalTok{ridge }\OtherTok{\textless{}{-}} \FunctionTok{glmnet}\NormalTok{(}
+  \AttributeTok{x =}\NormalTok{ X,}
+  \AttributeTok{y =}\NormalTok{ Y,}
+  \AttributeTok{alpha =} \DecValTok{0}                   \CommentTok{\# tells function whether we want to model}
+                              \CommentTok{\# ridge = 0, lasso = 1, }
+                              \CommentTok{\# anything in between is Elastic.}
+\NormalTok{)}
+
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Plot Model Object{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# plot() the glmnet() model object}
+\CommentTok{\# we are simplifying the model by including this penalty term to the sum of }
+\CommentTok{\# squared errors. This is to remove unnecessary coefficients}
+\FunctionTok{plot}\NormalTok{(ridge,}
+     \AttributeTok{xvar =} \StringTok{\textquotesingle{}lambda\textquotesingle{}}\NormalTok{)  }
+\end{Highlighting}
+\end{Shaded}
+
+\includegraphics{Lab3_files/figure-latex/unnamed-chunk-3-1.pdf}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# As we increase the size of lambda, we can see the coefficients are }
+\CommentTok{\# shrinking towards 0.}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 4}}. This time fit a ridge regression model and
+  a lasso model, both with using cross validation. The glmnet package
+  kindly provides a cv.glmnet() function to do this (similar to the
+  glmnet() function that we just used). Use the alpha argument to
+  control which type of model you are running. Plot the results.
+\end{itemize}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Double Cross Validation Model Fit{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# Cross validation for tuning. }
+\CommentTok{\# We are going to be resampling our data by breaking it into pieces and running }
+\CommentTok{\# the multi{-}folds. The average of this will be our assessment of model }
+\CommentTok{\# efficiency on unseen data. The default number of folds is 10{-}fold.}
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Ridge Regression Model{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# cv is telling us to use cross validation}
+\NormalTok{ridge }\OtherTok{\textless{}{-}} \FunctionTok{cv.glmnet}\NormalTok{(}
+  \AttributeTok{x =}\NormalTok{ X,}
+  \AttributeTok{y =}\NormalTok{ Y,}
+  \AttributeTok{alpha =} \DecValTok{0}
+\NormalTok{)}
+
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Lasso Model{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# Apply CV lasso regression to Ames data}
+\NormalTok{lasso }\OtherTok{\textless{}{-}} \FunctionTok{cv.glmnet}\NormalTok{(}
+  \AttributeTok{x =}\NormalTok{ X,}
+  \AttributeTok{y =}\NormalTok{ Y,}
+  \AttributeTok{alpha =} \DecValTok{1}
+\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 5}}. Interpret the graphs. What is being
+  displayed on the axes here? How does the performance of the models
+  change with the value of lambda?
+\end{itemize}
+
+Each plot is displaying how well each model is predicting the hold out
+cell -- the average mean-squared error the entire cross validation
+model. As lambda increases, the MSE is increasing. We want a lambda that
+minimizes MSE. This is telling us where our optimal points are for MSE.
+The dotted lines are created by the one standard error rule (within 1
+std error of the folds).
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Interpreting Model Performance{-}{-}{-}{-}{-}{-}}
+\CommentTok{\# plot results}
+\FunctionTok{par}\NormalTok{(}\AttributeTok{mfrow =} \FunctionTok{c}\NormalTok{(}\DecValTok{1}\NormalTok{, }\DecValTok{2}\NormalTok{))}
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Ridge Model Plot{-}{-}{-}{-}{-}{-}}
+\NormalTok{ridge\_mod\_plot }\OtherTok{\textless{}{-}} \FunctionTok{plot}\NormalTok{(ridge, }\AttributeTok{main =} \StringTok{"Ridge penalty}\SpecialCharTok{\textbackslash{}n\textbackslash{}n}\StringTok{"}\NormalTok{)}
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Lasso Model Plot{-}{-}{-}{-}{-}{-}}
+\NormalTok{lasso\_mod\_plot }\OtherTok{\textless{}{-}} \FunctionTok{plot}\NormalTok{(lasso, }\AttributeTok{main =} \StringTok{"Lasso penalty}\SpecialCharTok{\textbackslash{}n\textbackslash{}n}\StringTok{"}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\includegraphics{Lab3_files/figure-latex/unnamed-chunk-5-1.pdf}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 6}}. Inspect the ridge model object you created
+  with cv.glmnet(). The \$cvm column shows the MSEs for each CV fold.
+  What is the minimum MSE? What is the value of lambda associated with
+  this MSE minimum?
+\end{itemize}
+
+The min MSE for the ridge model is \textasciitilde{}\texttt{0.0450} with
+the value of \texttt{0.0208} for the associated lambda.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}{-}Ridge model{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}}
+
+\CommentTok{\# minimum MSE output in console}
+\FunctionTok{min}\NormalTok{(ridge}\SpecialCharTok{$}\NormalTok{cvm)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 0.04411032
+\end{verbatim}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# lambda value at the min MSE}
+\NormalTok{ridge}\SpecialCharTok{$}\NormalTok{lambda.min}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 0.02174702
+\end{verbatim}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# 1{-}SE rule}
+\CommentTok{\# output a lambda value that is separated by the smallest 1{-}squared error }
+\NormalTok{ridge}\SpecialCharTok{$}\NormalTok{cvm[ridge}\SpecialCharTok{$}\NormalTok{lambda }\SpecialCharTok{==}\NormalTok{ ridge}\SpecialCharTok{$}\NormalTok{lambda}\FloatTok{.1}\NormalTok{se]}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 0.04552346
+\end{verbatim}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# lambda for this MSE}
+\NormalTok{ridge}\SpecialCharTok{$}\NormalTok{lambda}\FloatTok{.1}\NormalTok{se}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 0.03800354
+\end{verbatim}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 7}}. Do the same for the lasso model. What is
+  the minimum MSE? What is the value of lambda associated with this MSE
+  minimum?
+\end{itemize}
+
+Data scientists often use the ``one-standard-error'' rule when tuning
+lambda to select the best model. This rule tells us to pick the most
+parsimonious model (fewest number of predictors) while still remaining
+within one standard error of the overall minimum cross validation error.
+The cv.glmnet() model object has a column that automatically finds the
+value of lambda associated with the model that produces an MSE that is
+one standard error from the MSE minimum (\$lambda.1se).
+
+The min MSE for the lasso model is \texttt{0.0426} with the value of
+\texttt{0.000101} for the associated lambda.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}{-}Lasso model{-}{-}{-}{-}{-}{-}{-}{-}}
+
+\CommentTok{\# minimum MSE}
+\FunctionTok{min}\NormalTok{(lasso}\SpecialCharTok{$}\NormalTok{cvm)}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 0.04230738
+\end{verbatim}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# lambda value at the min MSE}
+\NormalTok{lasso}\SpecialCharTok{$}\NormalTok{lambda.min}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 9.635282e-05
+\end{verbatim}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# 1{-}SE rule}
+\CommentTok{\# same as above}
+
+\CommentTok{\# lambda for this MSE}
+\NormalTok{lasso}\SpecialCharTok{$}\NormalTok{lambda}\FloatTok{.1}\NormalTok{se}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## [1] 0.007635796
+\end{verbatim}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 8.}} Find the number of predictors associated
+  with this model (hint: the \$nzero is the \# of predictors column).
+\end{itemize}
+
+The number of predictors initially is 10 and is reduced to 7 using the
+lasso model penalty.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}{-}Lasso model{-}{-}{-}{-}{-}{-}{-}{-}{-}{-}}
+
+\CommentTok{\# No. of coef | 1{-}SE MSE}
+\CommentTok{\# this is to access our feature selection}
+\CommentTok{\# numbers that went to zero}
+\NormalTok{lasso}\SpecialCharTok{$}\NormalTok{nzero[lasso}\SpecialCharTok{$}\NormalTok{lambda }\SpecialCharTok{==}\NormalTok{ lasso}\SpecialCharTok{$}\NormalTok{lambda.min]}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## s83 
+##  10
+\end{verbatim}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# what is the affect of using that standard rule of 1{-}SE, we reduce the number of coefficients from 10 to 7}
+\NormalTok{lasso}\SpecialCharTok{$}\NormalTok{nzero[lasso}\SpecialCharTok{$}\NormalTok{lambda }\SpecialCharTok{==}\NormalTok{ lasso}\SpecialCharTok{$}\NormalTok{lambda}\FloatTok{.1}\NormalTok{se]}
+\end{Highlighting}
+\end{Shaded}
+
+\begin{verbatim}
+## s36 
+##   7
+\end{verbatim}
+
+\begin{itemize}
+\tightlist
+\item
+  \textbf{\emph{Question 9.}} Which regularized regression worked better
+  for this task, ridge or lasso? Explain your answer.
+\end{itemize}
+
+The min MSE for both models is relatively similar,
+\textasciitilde{}\texttt{0.0450}. However the ridge model reflected an
+associated lambda value of \texttt{0.0208} for the MSE. There is a
+significantly smaller margin for the 1-SE rule observed in the ridge
+regression model. Additionally, the convergence to zero is swifter and
+more uniform in the ridge model. For these reasons, the best regularized
+regression model applied was the ridge.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Ridge model{-}{-}{-}{-}{-}{-}{-}}
+\NormalTok{ridge\_min }\OtherTok{\textless{}{-}} \FunctionTok{glmnet}\NormalTok{(}
+  \AttributeTok{x =}\NormalTok{ X,}
+  \AttributeTok{y =}\NormalTok{ Y,}
+  \AttributeTok{alpha =} \DecValTok{0}
+\NormalTok{)}
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}Lasso model{-}{-}{-}{-}{-}{-}}
+\NormalTok{lasso\_min }\OtherTok{\textless{}{-}} \FunctionTok{glmnet}\NormalTok{(}
+  \AttributeTok{x =}\NormalTok{ X,}
+  \AttributeTok{y =}\NormalTok{ Y,}
+  \AttributeTok{alpha =} \DecValTok{1}
+\NormalTok{)}
+
+
+\FunctionTok{par}\NormalTok{(}\AttributeTok{mfrow =} \FunctionTok{c}\NormalTok{(}\DecValTok{1}\NormalTok{, }\DecValTok{2}\NormalTok{))}
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}plot ridge model{-}{-}{-}{-}{-}{-}}
+\FunctionTok{plot}\NormalTok{(ridge\_min,}
+     \AttributeTok{xvar =} \StringTok{"lambda"}\NormalTok{,}
+     \AttributeTok{main =} \StringTok{"Ridge penalty}\SpecialCharTok{\textbackslash{}n\textbackslash{}n}\StringTok{"}\NormalTok{)}
+\FunctionTok{abline}\NormalTok{(}\AttributeTok{v =} \FunctionTok{log}\NormalTok{(ridge}\SpecialCharTok{$}\NormalTok{lambda.min),}
+       \AttributeTok{col =} \StringTok{"red"}\NormalTok{, }\AttributeTok{lty =} \StringTok{"dashed"}\NormalTok{)}
+\FunctionTok{abline}\NormalTok{(}\AttributeTok{v =} \FunctionTok{log}\NormalTok{(ridge}\SpecialCharTok{$}\NormalTok{lambda}\FloatTok{.1}\NormalTok{se),}
+       \AttributeTok{col =} \StringTok{"blue"}\NormalTok{, }\AttributeTok{lty =} \StringTok{"dashed"}\NormalTok{)}
+
+\CommentTok{\#{-}{-}{-}{-}{-}{-}{-}plot lasso model{-}{-}{-}{-}{-}{-}}
+\FunctionTok{plot}\NormalTok{(lasso\_min,}
+     \AttributeTok{xvar =} \StringTok{"lambda"}\NormalTok{,}
+     \AttributeTok{main =} \StringTok{"Lasso penalty}\SpecialCharTok{\textbackslash{}n\textbackslash{}n}\StringTok{"}\NormalTok{)}
+\FunctionTok{abline}\NormalTok{(}\AttributeTok{v =} \FunctionTok{log}\NormalTok{(lasso}\SpecialCharTok{$}\NormalTok{lambda.min),}
+       \AttributeTok{col =} \StringTok{"red"}\NormalTok{, }\AttributeTok{lty =} \StringTok{"dashed"}\NormalTok{)}
+\FunctionTok{abline}\NormalTok{(}\AttributeTok{v =} \FunctionTok{log}\NormalTok{(lasso}\SpecialCharTok{$}\NormalTok{lambda}\FloatTok{.1}\NormalTok{se),}
+       \AttributeTok{col =} \StringTok{"blue"}\NormalTok{, }\AttributeTok{lty =} \StringTok{"dashed"}\NormalTok{)}
+\end{Highlighting}
+\end{Shaded}
+
+\includegraphics{Lab3_files/figure-latex/unnamed-chunk-9-1.pdf}
+
+\end{document}

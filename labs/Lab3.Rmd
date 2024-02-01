@@ -3,7 +3,7 @@ title: "Ingersoll_Lab3"
 author: "Sofia Ingersoll"
 date: 2024-02-01
 output: 
-  pdf_output
+  pdf_document
 ---
 
 ```{r setup, include=FALSE}
@@ -13,6 +13,7 @@ library(tidyverse)
 library(rsample)
 library(glmnet)
 library(patchwork)
+library(tinytex)
 
 set.seed(99)
 ```
@@ -30,7 +31,7 @@ Pull the abalone data from Github and take a look at it.
 ```{r data, include=FALSE}
 # read in data
 abdat<- read_csv(file = "https://raw.githubusercontent.com/MaRo406/eds-232-machine-learning/main/data/abalone-data.csv")
-glimpse(abdat)
+#glimpse(abdat)
 ```
 
 ### Data Splitting
@@ -41,7 +42,7 @@ We'll follow our text book's lead and use the caret package in our approach to t
 
 ```{r}
 #-------Split data for model------
-# creating initial data split
+# creating initial data split, default is 70/30
 split <- initial_split(abdat)
 
 # training data
@@ -58,13 +59,18 @@ ab_test <- testing(split)
 
 ```{r}
 #------Create Predictor Matrix------
-# Create training feature matrices using model.matrix() (auto encodes of categorical variables)
+# Create training feature matrices using model.matrix() 
+# (auto encodes of categorical variables)
 
-# for Rings, assess the relationship amongst all variables and remove the intercept variable of -1.
+# for Rings, assess the relationship amongst all variables and remove 
+# the intercept variable of -1.
 X <- model.matrix(Rings ~ ., data = ab_train)[,-1]      
 
 
-# Using skim(ab_train$Rings) in the console revealed a mean of 9.92 with a sd of 3.19. The histogram provided looked right skewed, indicating a potential need for a log transformation. Below we will apply a log transformation and run skim(Y) to test our theory.
+# Using skim(ab_train$Rings) in the console revealed a mean of 9.92 with 
+# a sd of 3.19. The histogram provided looked right skewed, indicating 
+# a potential need for a log transformation. Below we will apply 
+# a log transformation and run skim(Y) to test our theory.
 
 
 
@@ -72,7 +78,10 @@ X <- model.matrix(Rings ~ ., data = ab_train)[,-1]
 # transform y with log() transformation
 Y <- log(ab_train$Rings)
 
-# In the Console, running skim(Y) displayed the results of the transformation. The new mean is 2.25 with a significantly better sd of 0.317. The histogram percentiles juxtaposed to skim(ab_train$Rings) are more evenly distributed.
+# In the Console, running skim(Y) displayed the results of the transformation.
+# The new mean is 2.25 with a significantly better sd of 0.317.
+# The histogram percentiles juxtaposed to skim(ab_train$Rings) are 
+# more evenly distributed.
 ```
 
 
@@ -101,9 +110,9 @@ ridge <- glmnet(
 plot(ridge,
      xvar = 'lambda')  
 
-# As we increase the size of lambda, we can see the coefficients are shrinking towards 0.
+# As we increase the size of lambda, we can see the coefficients are 
+# shrinking towards 0.
 ```
-
 
 -   ***Question 4***. This time fit a ridge regression model and a lasso model, both with using cross validation. The glmnet package kindly provides a cv.glmnet() function to do this (similar to the glmnet() function that we just used). Use the alpha argument to control which type of model you are running. Plot the results.
 
@@ -132,7 +141,6 @@ lasso <- cv.glmnet(
 )
 
 ```
-
 
 -   ***Question 5***. Interpret the graphs. What is being displayed on the axes here? How does the performance of the models change with the value of lambda?
 
@@ -218,7 +226,7 @@ lasso$nzero[lasso$lambda == lasso$lambda.1se]
 
 ```
 
--   ***Question 9*****.** Which regularized regression worked better for this task, ridge or lasso? Explain your answer.
+-   ***Question 9.*** Which regularized regression worked better for this task, ridge or lasso? Explain your answer.
 
  
 The min MSE for both models is relatively similar, ~`0.0450`. However the ridge model reflected an associated lambda value of `0.0208` for the MSE. There is a significantly smaller margin for the 1-SE rule observed in the ridge regression model. Additionally, the convergence to zero is swifter and more uniform in the ridge model. For these reasons, the best regularized regression model applied was the ridge. 
@@ -259,5 +267,12 @@ abline(v = log(lasso$lambda.min),
        col = "red", lty = "dashed")
 abline(v = log(lasso$lambda.1se),
        col = "blue", lty = "dashed")
+```
+
+```{r include = FALSE}
+#update.packages(ask = FALSE, checkBuilt = TRUE)
+#tinytex::tlmgr_update()
+options(tinytex.verbose = TRUE)
+
 ```
 
