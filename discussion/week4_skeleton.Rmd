@@ -1,0 +1,226 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(spData)
+library(sf)
+library(ggpmisc)
+
+set.seed(99)
+
+# spherical geometry turned off
+# sf_use_s2(FALSE) # not needed here
+```
+
+## Read in data & lightly wrangle
+```{r message = FALSE}
+redlining = read_csv(here::here("discussion", "data", "redlining.csv")) %>% 
+  left_join(us_states_df %>% 
+              rename(name = state)) %>% 
+  janitor::clean_names()
+```
+## Tuning lambda in tidyverse
+
+We want to predict the percentage of areas that were given a D grade within each state, based on information provided about the state. 
+
+#### Quick data viz
+```{r}
+ggplot(redlining) +
+  geom_point(aes(
+    x = poverty_level_10,
+    y = percent,
+    alpha = 0.5,
+    col = median_income_10
+  ))
+```
+
+```{r}
+ggplot(redlining) +
+  geom_point(aes(
+    x = poverty_level_10,
+    y = percent,
+    alpha = 0.5,
+    col = region
+  ))
+```
+
+```{r}
+ggplot(redlining) +
+  geom_boxplot(aes(
+    x = region,
+    y = percent,
+    alpha = 0.5),
+    fill = 'transparent'
+  ) +
+  geom_point(aes(
+    region,
+    percent
+  )) +
+  theme_bw()
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+
+### Data Splitting
+
+Here, we are going to establish a k-fold cross validation for each repeat. It essentially allows us to run multiple sets of independently run tests. 10 folds with 5 repeats is a good standard. It will average across the whole thing.
+```{r}
+# splitting data
+split <- initial_split(redlining, prop = 0.7)
+# training data
+train <- training(split)
+# testing data
+test <- testing(split)
+
+
+# creating subsets for cross validation
+# v is our 'k' in k-fold cross validation
+folds <- vfold_cv(train,
+                  v = 5,
+                  repeats = 2)
+```
+
+### Recipe Specification
+
+```{r}
+recipe <- recipe(percent ~ region + area + total_pop_10 + median_income_10 + poverty_level_10, 
+                 data = train) %>%
+  step_normalize(all_numeric_predictors()) %>%      # normalize all numeric predictors
+  step_integer(all_nominal_predictors()) %>%        # makes nominal predictor as integer
+  step_interact(terms = ~total_pop_10:median_income_10) %>%  # create interactions between these terms total pop and med income 2010
+  step_interact(terms = ~total_pop_10:poverty_level_10) %>%  # interactions for these variables
+  step_interact(terms = ~poverty_level_10:median_income_10) 
+```
+
+### Model: Tuned Linear Regression
+
+```{r}
+lm_model <- linear_reg(penalty = tune(),
+                       mixture = tune()) %>% # without including tune here is a typical model set up without lambda tuning parameters
+  set_engine('glmnet') %>% 
+  set_mode('regression')         
+
+```
+#### Create a workflow
+```{r}
+lm_wflw <- workflow() %>% 
+  add_model(lm_model) %>% 
+  add_recipe(recipe)
+
+lm_wflw
+```
+#### Tune grid 
+creates a way to combine testing combinations into a single space for cross validation tuning. a subset of parameters may be specified for the grids and sequences may be specified.
+```{r}
+?tune_grid
+```
+
+Running 5-fold validation 25 times, 2 times each.
+Takes 5 values from each parameter (takes every single combination of these parameters against each other as x vs y)
+
+Grid specifies the number of lambdas we are testing
+
+This could take a very long time when working with larger datasets.
+```{r, eval = FALSE}
+lm_cv_tune <- lm_wflw %>% 
+  tune_grid(resamples = folds,
+            grid = 5)
+```
+
+```{r}
+?collect_metrics #from tune
+```
+
+Stat summary of the values from mixture and tuning it tested. One row for each estimator. RMSE, RSQ, & SE.
+
+RSQ is lasso (1), ridge (0), or elastic (0:1), but the bottom left is likely representign lambda. Need to double check documentation.
+
+Want lowest RMSE
+Want highest RQS
+```{r}
+collect_metrics(lm_cv_tune)
+```
+
+```{r}
+autoplot(lm_cv_tune) +
+  theme_bw()
+```
+
+#### Finalize workflow
+
+```{r}
+?show_best
+?finalize_workflow()
+```
+
+
+rmse is our lost function: this is tightly structured formula that will provide the lost function for our decision tree.
+
+Out of bag prediction: modeling new data in an interactive way that a cross validation would also assess model accuracy.
+
+As long as these are relatively the same, things are looking good for the model.
+```{r}
+# this line can be skipped and we can apply select_best as we did in the lm_final
+lm_best <- show_best(lm_cv_tune, 
+                     n = 1,  # only want the best model, can add as many as we want
+                     metric = 'rmse')    
+
+lm_best
+
+lm_final = finalize_workflow(lm_wflw,
+                             select_best(lm_cv_tune,
+                                         metric = 'rmse'))
+# now we have values assigned to the penalty and mixture that are optimally tuned for our model
+lm_final
+```
+### Model Fitting
+
+```{r, include=FALSE}
+# fit the data to the training data
+lm_fit <- fit(lm_final, train)
+```
+
+```{r, include=FALSE}
+train_predict <- predict(lm_fit, train) %>% 
+  bind_cols(train)
+
+test_predict <- predict(lm_fit, test) %>% 
+  bind_cols(test)
+```
+
+Our test metrics are roughly twice the size of our training metrics. This indicates overfitting issues. We could have also gotten lucky with our training data. We want the lowest rmse with minimal rsq.
+
+```{r}
+train_metrics <- train_predict %>% 
+  metrics(percent, .pred)
+
+train_metrics
+
+test_metrics <- test_predict %>% 
+  metrics(percent, .pred)
+
+test_metrics
+```
+
+### Visualization
+
+```{r}
+ggplot(test_predict,
+       aes(
+         x = percent,
+         y = .pred
+       )
+) +
+  geom_point() +
+  stat_poly_line() +
+  stat_poly_eq(use_label('eq')) +
+  stat_poly_eq(label.y = 0.9)
+```
+
