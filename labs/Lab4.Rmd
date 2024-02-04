@@ -13,6 +13,7 @@ library(tidymodels)
 library(caret)
 library(rsample)
 library(recipes)
+library(corrplot)
 ```
 
 ## Lab 4: Fire and Tree Mortality
@@ -21,12 +22,14 @@ The database we'll be working with today includes 36066 observations of individu
 
 ### Data Exploration
 
-Outcome variable: *yr1status* = tree status (0=alive, 1=dead) assessed one year post-fire.
+Outcome variable: yr1status = tree status (0=alive, 1=dead) assessed one year post-fire.
 
-Predictors: *YrFireName, Species, Genus_species, DBH_cm, CVS_percent, BCHM_m, BTL* (Information on these variables available in the database metadata ([link](https://www.fs.usda.gov/rds/archive/products/RDS-2020-0001-2/_metadata_RDS-2020-0001-2.html))).
+Predictors: YrFireName, Species, Genus_species, DBH_cm, CVS_percent, BCHM_m, BTL (Information on these variables available in the database metadata ([link](https://www.fs.usda.gov/rds/archive/products/RDS-2020-0001-2/_metadata_RDS-2020-0001-2.html))).
 
 ```{r message = FALSE}
-trees_dat<- read_csv(file = "https://raw.githubusercontent.com/MaRo406/eds-232-machine-learning/main/data/trees-dat.csv")
+url <- "https://raw.githubusercontent.com/MaRo406/eds-232-machine-learning/main/data/trees-dat.csv"
+
+trees_dat<- read_csv(file = url)
 ```
 
 > Question 1: Recode all the predictors to a zero_based integer form
@@ -34,12 +37,17 @@ trees_dat<- read_csv(file = "https://raw.githubusercontent.com/MaRo406/eds-232-m
 ### Data Splitting
 
 ```{r recipe}
-#specify and prep recipe to convert entire df 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Recipe Prep & Bake Data                         ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# specify and prep recipe to convert entire df 
+# turn all predictors to a binary variable using 0 or 1.
 trees_rec <- recipe(yr1status~., data = trees_dat) %>% 
-  step_integer(., zero_based = T) %>%              # turn all predictors to a binary variable using 0 or 1.
+  step_integer(., zero_based = T) %>%              
   prep(trees_dat) 
 
-# to view the training status of this object, call it in the console. the binary variable will be converted when we bake our recipe
+# to view the training status of this object, call it in the console. 
+# the binary variable will be converted when we bake our recipe
 
 # bake recipe with zero_based trees df
 trees_baked <- bake(trees_rec, new_data =  trees_dat)
@@ -48,47 +56,192 @@ trees_baked <- bake(trees_rec, new_data =  trees_dat)
 > Question 2: Create trees_training (70%) and trees_test (30%) splits for the modeling
 
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                       Split Baked Data                               ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Create training (70%) and test (30%) sets for the 
-set.seed(123)  # for reproducibility 
-trees_split <- initial_split(trees_baked, prop = .7)
-trees_train <- training(trees_split)
-trees_test  <- testing(trees_split)
+set.seed(123)        # for reproducibility 
+trees_baked_split <- initial_split(trees_baked, prop = .7)
+trees_baked_train <- training(trees_baked_split)
+trees_baked_test  <- testing(trees_baked_split)
 ```
 
-
 > Question 3: How many observations are we using for training with this split?
+>
+> `trees_baked_train` contains 25246 observations.
 
-### Simple Logistic Regression 
+### Simple Logistic Regression
 
 Let's start our modeling effort with some simple models: one predictor and one outcome each.
 
+Outcome variable: yr1status = tree status (0=alive, 1=dead) assessed one year post-fire.
+
+Predictors: YrFireName, Species, Genus_species, DBH_cm, CVS_percent, BCHM_m, BTL (Information on these variables available in the database metadata ([link](https://www.fs.usda.gov/rds/archive/products/RDS-2020-0001-2/_metadata_RDS-2020-0001-2.html))).
+
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Making 1 v 1 models                             ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ---- Model Tree status & species ----
+model_baked_species <- glm(data = trees_baked_train,
+                     yr1status ~ Species,
+                     family = "binomial")  
 
+# --- Model Tree status & Genus species ----
+model_baked_genus <- glm(data = trees_baked_train,
+                   yr1status ~ Genus_species,
+                   family = "binomial")
+
+# ---- Model Tree status & DBH_cm ----
+model_baked_DBH_cm <- glm(data = trees_baked_train,
+                    yr1status ~ DBH_cm,
+                    family = "binomial") 
+
+# --- Model Tree status & CVS_percent ----
+model_baked_CVS_percent <- glm(data = trees_baked_train,
+                         yr1status ~ CVS_percent,
+                         family = "binomial") 
+
+# ---- Model Tree status & BCHM_m ----
+model_baked_BCHM_m <- glm(data = trees_baked_train,
+                    yr1status ~ BCHM_m,
+                    family = "binomial") 
+
+# --- Model Tree status & BTL ----
+model_baked_BTL <- glm(data = trees_baked_train,
+                 yr1status ~ BTL,
+                 family = "binomial")
 ```
-
 
 > Question 4: Choose the three predictors that most highly correlate with our outcome variable for further investigation.
 
+Highest Correlated Predictors in descending order:
+- CVS_percent   (0.68)
+- BCHM_m        (0.42)
+- DBH_cm        (-0.3)
 
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                    Correlation Matrix                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Obtain correlation matrix
+# Drop columns that are not really informative
+# Convert chr to integers
+corr_mat <- trees_baked_train %>% 
+  select(-c(1, YrFireName)) %>% 
+  mutate(Species = as.integer(Species, zero_based = TRUE),
+         Genus_species = as.integer(Genus_species, zero_based = TRUE)) %>% 
+  cor()
 
+# Make a correlation plot between the variables
+corrplot(corr_mat, 
+         method = "shade",
+         shade.col = NA,
+         tl.col = "black",
+         tl.srt = 45, 
+         addCoef.col = "black",
+         cl.pos = "n", 
+         order = "original")
 ```
 
 > Question 5: Use glm() to fit three simple logistic regression models, one for each of the predictors you identified.
 
-### Interpret the Coefficients 
+### Interpret the Coefficients
 
 We aren't always interested in or able to interpret the model coefficients in a machine learning task. Often predictive accuracy is all we care about.
 
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                     Split Unbaked Data                               ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Create training (70%) and test (30%) sets for the 
+set.seed(123)  # for reproducibility 
+trees_split <- initial_split(trees_dat, prop = .7)
+trees_train <- training(trees_split)
+trees_test  <- testing(trees_split)
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                  Making 1 v 1 unbaked models                         ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ---- Model Tree status & species ----
+model_species <- glm(data = trees_train,
+                     yr1status ~ Species,
+                     family = "binomial")  
+
+# --- Model Tree status & Genus species ----
+model_genus <- glm(data = trees_train,
+                   yr1status ~ Genus_species,
+                   family = "binomial")
+
+# ---- Model Tree status & DBH_cm ----
+model_DBH_cm <- glm(data = trees_train,
+                    yr1status ~ DBH_cm,
+                    family = "binomial") 
+
+# --- Model Tree status & CVS_percent ----
+model_CVS_percent <- glm(data = trees_train,
+                         yr1status ~ CVS_percent,
+                         family = "binomial") 
+
+# ---- Model Tree status & BCHM_m ----
+model_BCHM_m <- glm(data = trees_train,
+                    yr1status ~ BCHM_m,
+                    family = "binomial") 
+
+# --- Model Tree status & BTL ----
+model_BTL <- glm(data = trees_train,
+                 yr1status ~ BTL,
+                 family = "binomial")
 ```
-
 
 > Question 6: That said, take a stab at interpreting our model coefficients now.
 
-```{r}
+Understanding these variables we need to exponentiate the model coefficients. This will give us the log odds of experiencing the outcome variable for a single unit increase in our beta 1 variable. This gives us the multiplicative of the outcome.
 
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----           Interpreting 1 v 1 unbaked models                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# exponentiate the coefficients from model objects for interpretation. 
+# Gives us changes in odds of tree status 
+
+# ---- Model Tree status & species ----
+# the odds the tree status is living decreases, but varies by
+# an independent multiplicative for each unit change in species
+  exp(coef(model_species)) %>% 
+  broom::tidy()
+
+# --- Model Tree status & Genus species ----
+# the odds of tree status is living primarily increases, but varies by 
+# an independent multiplicative for each unit change in genus species
+exp(coef(model_genus))  %>% 
+  broom::tidy()
+
+# ---- Model Tree status & DBH_cm ----
+# the odds the tree status is living decreases by 
+# a multiplicative 0.06 for a unit increase in DBH_cm
+exp(coef(model_DBH_cm)) %>% 
+  broom::tidy()
+
+# --- Model Tree status & CVS_percent ----
+# the odds the tree status is living increases by
+# a multiplicative 0.08 for a unit increase in CVS percent
+exp(coef(model_CVS_percent)) %>% 
+  broom::tidy()
+
+
+# ---- Model Tree status & BCHM_m ----
+# the odds the tree status is living increases by 
+# a multiplicative 0.2 for a unit increase in BCHM m
+exp(coef(model_BCHM_m)) %>% 
+  broom::tidy()
+
+
+# --- Model Tree status & BTL ----
+# the odds the tree status is living increases by 
+# a multiplicative 0.33 for a unit increase in BTL
+exp(coef(model_BTL)) %>% 
+  broom::tidy()
 ```
 
 > Question 7: Now let's visualize the results from these models. Plot the fit to the training data of each model.
@@ -101,7 +254,6 @@ Let's not limit ourselves to a single-predictor model. More predictors might lea
 
 ```
 
-
 > Question 8: Use glm() to fit a multiple logistic regression called "logistic_full", with all three of the predictors included. Which of these are significant in the resulting model?
 
 ### Estimate Model Accuracy
@@ -111,7 +263,6 @@ Now we want to estimate our model's generalizability using resampling.
 ```{r}
 
 ```
-
 
 > Question 9: Use cross validation to assess model accuracy. Use caret::train() to fit four 10-fold cross-validated models (cv_model1, cv_model2, cv_model3, cv_model4) that correspond to each of the four models we've fit so far: three simple logistic regression models corresponding to each of the three key predictors (CVS_percent, DBH_cm, BCHM_m) and a multiple logistic regression model that combines all three predictors.
 
@@ -127,16 +278,13 @@ Let's move forward with this single most accurate model.
 
 ```
 
-
 > Question 11: Compute the confusion matrix and overall fraction of correct predictions by the model.
-
 
 ```{r}
 
 ```
 
 > Question 12: Explain what the confusion matrix is telling you about the types of mistakes made by logistic regression.
-
 
 ```{r}
 
@@ -152,9 +300,7 @@ Alright, now we'll take our most accurate model and make predictions on some uns
 
 ```
 
-
 > Question 14: Now that we have identified our best model, evaluate it by running a prediction on the test data, trees_test.
-
 
 ```{r}
 
@@ -162,8 +308,10 @@ Alright, now we'll take our most accurate model and make predictions on some uns
 
 > Question 15: How does the accuracy of this final model on the test data compare to its cross validation accuracy? Do you find this to be surprising? Why or why not?
 
-
 ```{r}
 
 ```
 
+```{r}
+
+```
