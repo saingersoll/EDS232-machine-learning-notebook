@@ -1,0 +1,385 @@
+---
+title: "Lab5"
+author: "Sofia Ingersoll"
+date: "2023-02-07"
+output: html_document
+---
+
+This week's lab is a musical lab. You'll be requesting data from the Spotify API and using it to build k-nearest neighbor and decision tree models.
+
+In order to use the Spotify API you must have a Spotify account. If you don't have one, sign up for a free one here: <https://www.spotify.com/us/signup>
+
+Once you have an account, go to Spotify for developers (<https://developer.spotify.com/>) and log in. Click the green "Create a Client ID" button to fill out the form to create an app create an app so you can access the API.
+
+On your developer dashboard page, click on the new app you just created. Go to Settings -\> Basic Information and you will find your Client ID . Click "View client secret" to access your secondary Client ID. Scroll down to Redirect URIs and enter: <http://localhost:1410/>
+
+You have two options for completing this lab.
+
+**Option 1**: **Classify by users**. Build models that predict whether a given song will be in your collection vs. a partner in class. This requires that you were already a Spotify user so you have enough data to work with. You will download your data from the Spotify API and then exchange with another member of class.
+
+**Option 2**: **Classify by genres**. Build models that predict which genre a song belongs to. This will use a pre-existing Spotify dataset available from Kaggle.com (<https://www.kaggle.com/datasets/mrmorj/dataset-of-songs-in-spotify>)
+
+```{r include = FALSE, message = FALSE}
+library(spotifyr) #API interaction
+library(tidyverse)
+library(tidymodels)
+```
+
+Client ID and Client Secret are required to create and access token that is required to interact with the API. You can set them as system values so we don't have to do provide them each time.
+
+```{r include = FALSE, access_API}
+
+#Sys.setenv(SPOTIFY_CLIENT_ID = 'your_client_id_here') 
+#Sys.setenv(SPOTIFY_CLIENT_SECRET = 'you_client_secret_here')
+
+#authorization_code <- get_spotify_authorization_code(scope = scopes()[c(1:19)]) #sets an authorization code that you'll need to provide for certain get_ functions via my_tracks <- get_my_saved_tracks(authorization = authorization_code)
+
+#access_token <- get_spotify_access_token() #takes ID and SECRET, sends to Spotify and receives an access token
+```
+
+**Option 1: Data Preparation**
+
+You can use get_my_saved_tracks() to request all your liked tracks. It would be good if you had at least 150-200 liked tracks so the model has enough data to work with. If you don't have enough liked tracks, you can instead use get_my_recently_played(), and in that case grab at least 500 recently played tracks if you can.
+
+The Spotify API returns a dataframe of tracks and associated attributes. However, it will only return up to 50 (or 20) tracks at a time, so you will have to make multiple requests. Use a function to combine all your requests in one call.
+
+Once you have your tracks, familiarize yourself with this initial dataframe. You'll need to request some additional information for the analysis. If you give the API a list of track IDs using get_track_audio_features(), it will return an audio features dataframe of all the tracks and some attributes of them.
+
+These track audio features are the predictors we are interested in, but this dataframe doesn't have the actual names of the tracks. Append the 'track.name' column from your favorite tracks database.
+
+Find a class mate whose data you would like to use. Add your partner's data to your dataset. Create a new column that will contain the outcome variable that you will try to predict. This variable should contain two values that represent if the track came from your data set or your partner's.
+
+**Option 2: Data preparation**
+
+Download the Spotify dataset from <https://www.kaggle.com/datasets/mrmorj/dataset-of-songs-in-spotify>
+
+Inspect the data. Choose two genres you'd like to use for the classification task. Filter down the data to include only the tracks of that genre.
+
+###Data Exploration (both options)
+
+Let's take a look at your data. Do some exploratory summary stats and visualization.
+
+For example: What are the most danceable tracks in your dataset? What are some differences in the data between users (Option 1) or genres (Option 2)?
+
+### **Modeling**
+
+Create competing models that predict whether a track belongs to:
+
+Option 1. you or your partner's collection
+
+**Option 2. genre 1 or genre 2**
+
+You will eventually create four final candidate models:
+
+1.  k-nearest neighbor (Week 5)
+2.  decision tree (Week 5)
+3.  bagged tree (Week 6)
+    -   bag_tree()
+    -   Use the "times =" argument when setting the engine during model specification to specify the number of trees. The rule of thumb is that 50-500 trees is usually sufficient. The bottom of that range should be sufficient here.
+4.  random forest (Week 6)
+    -   rand_forest()
+    -   m_try() is the new hyperparameter of interest for this type of model. Make sure to include it in your tuning process
+
+Go through the modeling process for each model:
+
+Preprocessing. You can use the same recipe for all the models you create.
+
+Resampling. Make sure to use appropriate resampling to select the best version created by each algorithm.
+
+Tuning. Find the best values for each hyperparameter (within a reasonable range).
+
+Compare the performance of the four final models you have created.
+
+Use appropriate performance evaluation metric(s) for this classification task. A table would be a good way to display your comparison. Use at least one visualization illustrating your model results.
+
+## Libraries
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         System Set Up                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(here)         # easy file paths
+library(tidyverse)    # data wrangling
+library(tidymodels)   # modeling
+library(xgboost)      # package for boosted trees
+library(ranger)       # package for random forest non-default external package
+library(patchwork)
+library(tidymodels)
+library(ranger)
+library(xgboost)
+library(rpart)
+
+set.seed(99)          # set random seed
+```
+
+## Loading and Splitting Data
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                       Load & Clean Data                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# genre data set
+kaggle_dat <- read_csv(here("data","genres_v2.csv"))
+
+# table(kaggle_dat$genre)
+# unique(kaggle_dat$genre)
+
+# Removing uninformative columns and selecting
+# techhouse and hardstyle as the two genres here and making case consistent
+
+genre_dat <- kaggle_dat %>%
+  select(-c(type, uri, track_href, analysis_url, `Unnamed: 0`, title, tempo, id, song_name)) %>%
+  filter(genre == "techhouse"| genre == "hardstyle") %>%
+  mutate(genre = as.factor(genre))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Split Data                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# split the data
+genre_split <- initial_split(genre_dat)
+
+# traing data
+genre_train <- training(genre_split)
+
+# testing data
+genre_test <- testing(genre_split)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Prep Data for Models                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Pre process the data
+genre_rec <- recipe(genre ~ .,
+                    data = genre_train) %>% 
+  step_dummy(all_nominal_predictors(), 
+             one_hot = TRUE) %>% 
+  step_normalize(all_numeric())
+```
+
+
+# K Nearest Neighbor Model
+Matching based on characteristics
+```{r}
+
+```
+
+
+# Decision Tree
+
+Parallel trees with tuning parameters to optimize model fitting.
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                       Tuning Decision Tree                           ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# new spec, tell the model that we are tuning hyperparams
+tree_spec_tune <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) %>% 
+  set_engine('rpart') %>% 
+  set_mode('classification')
+
+# info about the possible range of this hyperparameter valuea
+# 5 x 5 x 5 grid of the parameters for cross validation
+tree_grid <- grid_regular(cost_complexity(),
+                          tree_depth(),
+                          min_n(),
+                          levels = 5)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Workflow                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+wf_tree_tune <- workflow() %>% 
+  add_recipe(genre_rec) %>% 
+  add_model(tree_spec_tune)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Cross Validation                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#set up k-fold cv. This can be used for all the algorithms
+genre_cv <- genre_train %>% 
+  vfold_cv(v = 10)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Parallel Trees                               ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# in parallel, create a set of decision trees
+doParallel::registerDoParallel() 
+
+system.time(
+  tree_rs <- tune_grid(
+    wf_tree_tune,
+    resamples = genre_cv,
+    grid = tree_grid,
+    metrics = metric_set(accuracy)
+  )
+)
+
+#tree_rs
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                    Visualize Parallel Trees                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize our parallel trees model
+autoplot(tree_rs) +
+  theme_bw()
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# finalize workflow using the best tree and tuning
+final_tree <- finalize_workflow(wf_tree_tune,
+                                select_best(tree_rs))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#similar functions here.
+final_tree_fit <- fit(final_tree,
+                      data = genre_train) 
+
+# last_fit() fits on the training data but then also evaluates on test data
+# this combines fit and predict
+final_tree_result <- last_fit(final_tree,
+                              genre_split)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Visualize fit model
+final_tree_fit %>% 
+  vip(geom = 'col',
+      aesthetics = list(fill = 'midnightblue'),
+      alpha = 0.8) +
+  scale_y_continuous(expand = c(0,0)) 
+
+
+predict_data <- as.data.frame(final_tree_result$.predictions) %>% 
+  bind_cols(genre_test)
+
+ggplot() +
+  geom_boxplot(data = predict_data,
+               aes(.pred_class,
+                   duration_ms))
+```
+
+
+# Bagged Tree
+
+All covariates are considered
+```{r}
+
+```
+
+
+# Random Forest
+
+A random subset of covariates are considered
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                       Tuning Random Forest                           ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ensemble of decision trees
+# mtry subsets at each parameter to create tree (must be n-1 no. predictors)
+# trees is no. of tree models 
+rf_model <- rand_forest(mtry = tune(),
+                  trees = tune()) %>% 
+  # this is a package loaded in libs
+  set_engine('ranger') %>% 
+  set_mode('classification')
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Workflow                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# establish wkflw for model
+rf_workflow <- workflow() %>% 
+  add_model(rf_model) %>% 
+  add_recipe(fish_recipe)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Cross Validation                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# use cross validation to tune mtry and treesfor 5 parameters combinations
+# this takes a very long time to run
+rf_cv_tune = rf_workflow %>%
+  tune_grid(resamples = cv_folds,
+            grid = 5) 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# store the best tuning metrics
+rf_best = show_best(rf_cv_tune, n = 1, metric = "roc_auc")
+
+# finalize workflow
+rf_final <-  finalize_workflow(rf_workflow,
+                               rf_best)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# similar functions here.
+
+# fit the KNN model to the training set
+train_fit_rf <- fit(rf_final, train) 
+
+# get prediction for test 
+test_predict_rf = predict(train_fit_rf, test) %>% 
+  # bind to testing column
+  bind_cols(test) %>%  
+  mutate(habitat = as.factor(habitat))
+
+# get testing prediction probabilities
+test_predict2_rf = predict(train_fit_rf, test, type = "prob") %>% 
+  # bind to testing column
+  bind_cols(test) %>%  
+  mutate(habitat = as.factor(habitat))
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+accuracy(test_predict_rf, truth <- habitat, estimate = .pred_class) 
+
+
+test_roc_auc_rf <- roc_curve(test_predict2_rf,
+                             habitat,
+                             .pred_bathydemersal,
+                             .pred_bathypelagic,
+                             .pred_benthopelagic, 
+                             .pred_demersal, 
+                             .pred_pelagic, 
+                             `.pred_pelagic-neritic`,
+                             `.pred_pelagic-oceanic`,
+                             `.pred_reef-associated`)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize model
+
+# create confusion matrix
+rf_cm <- test_predict_rf %>% 
+  conf_mat(truth = habitat,
+           estimate = .pred_class) %>% 
+  # plot confusion matrix with heatmap
+  autoplot(type = "heatmap") + 
+  # change theme
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 30,
+                                   hjust=1)) +
+  #rotate axis labels
+  labs(title = "Random Forest")
+
+# ROC model plots
+rf_roc = autoplot(test_roc_auc_rf) +
+  theme_bw() +
+  labs(title = "Random Forest")
+```
+
+
+
+
