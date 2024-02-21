@@ -74,11 +74,11 @@ You will eventually create four final candidate models:
 1.  k-nearest neighbor (Week 5)
 2.  decision tree (Week 5)
 3.  bagged tree (Week 6)
-    -   bag_tree()
-    -   Use the "times =" argument when setting the engine during model specification to specify the number of trees. The rule of thumb is that 50-500 trees is usually sufficient. The bottom of that range should be sufficient here.
+-   bag_tree()
+-   Use the "times =" argument when setting the engine during model specification to specify the number of trees. The rule of thumb is that 50-500 trees is usually sufficient. The bottom of that range should be sufficient here.
 4.  random forest (Week 6)
-    -   rand_forest()
-    -   m_try() is the new hyperparameter of interest for this type of model. Make sure to include it in your tuning process
+-   rand_forest()
+-   m_try() is the new hyperparameter of interest for this type of model. Make sure to include it in your tuning process
 
 Go through the modeling process for each model:
 
@@ -109,6 +109,11 @@ library(tidymodels)
 library(ranger)
 library(xgboost)
 library(rpart)
+library(ipred)       # for fitting bagged decision trees
+library(parsnip)
+library(doParallel)  # for parallel backend to foreach
+library(foreach)     # for parallel processing with for loops
+library(caret)       # for general model fitting
 
 set.seed(99)          # set random seed
 ```
@@ -160,7 +165,78 @@ genre_rec <- recipe(genre ~ .,
 # K Nearest Neighbor Model
 Matching based on characteristics
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                            Tuning KNN                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Define our KNN model with tuning, not expecting a number just that main argu = tune
+knn_spec_tune <- nearest_neighbor(neighbors = tune()) %>%  
+  set_mode("classification") %>% 
+  set_engine("kknn")
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Workflow                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Define a new workflow
+wf_knn_tune <- workflow() %>%  
+  add_model(knn_spec_tune) %>%  
+  add_recipe(genre_rec)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Cross Validation                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#set up k-fold cv. This can be used for all the algorithms
+genre_cv <- genre_train %>% 
+  vfold_cv(v = 10)
+
+# Fit the workflow on our predefined folds and a grid of hyperparameters
+fit_knn_cv <- wf_knn_tune %>%  
+  tune_grid(
+    genre_cv,
+    #running model 60 times 5 folds x 12 neighbors
+    grid = data.frame(neighbors = c(1,5,seq(10,100,10)))
+  )
+
+# Check the performance, ran the mdoel 5 times and measured accuracy and roc_auc 
+fit_knn_cv %>% 
+  collect_metrics()
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# The final workflow for our KNN model. Finalize_workflow takes a workflow and a set of parameters.  In this case, that set is just the best value of k
+final_wf <- wf_knn_tune %>%  
+  finalize_workflow(select_best(fit_knn_cv, metric = "accuracy"))
+
+# Check out the final workflow object.  Choosing accuracy for interpretability in this simple binary context, mine found that 20 neighbors was most accurate 
+final_wf
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Fitting our final workflow
+final_fit <- final_wf %>%  
+  fit(data = genre_train)
+# Examine the final workflow
+final_fit
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+genre_knn_pred <- final_fit %>%  
+  predict(new_data = genre_test)
+
+genre_knn_pred
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+# Write over 'final_fit' with this last_fit() approach
+final_fit <- final_wf %>%  
+  last_fit(genre_split)
+# Collect metrics on the test data!
+final_fit %>%  collect_metrics()
 ```
 
 
@@ -269,7 +345,90 @@ ggplot() +
 
 All covariates are considered
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Tuning Bagged Tree                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# train bagged model
+bagged_spec <- bagging(
+  formula = genre ~ .,
+  data = genre_train,
+  # set the number of trees to be 50, set_engine('rpart',times = 50) was not working
+  nbagg = 50,  
+  coob = TRUE,
+  # min no. of observations required at each node prior to splitting
+  control = rpart.control(minsplit = 2, cp = 0)
+) 
 
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Create a parallel socket cluster
+cl <- makeCluster(8) # use 8 workers
+registerDoParallel(cl) # register the parallel backend
+
+# Fit trees in parallel and compute predictions on the test set
+predictions <- foreach(
+  icount(160), 
+  .packages = "rpart", 
+  .combine = cbind
+  ) %dopar% {
+    # bootstrap copy of training data
+    index <- sample(nrow(genre_train), replace = TRUE)
+    genre_train_boot <- genre_train[index, ]  
+  
+    # fit tree to bootstrap copy
+    bagged_tree <- rpart(
+      genre ~ ., 
+      control = rpart.control(minsplit = 2, cp = 0),
+      data = genre_train_boot
+      ) 
+    
+    predict(bagged_tree, newdata = genre_test)
+}
+
+predictions[1:5, 1:7]
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+predictions %>%
+  as.data.frame() %>%
+  
+  mutate(
+    observation = 1:n(),
+    
+    actual = genre_test$genre) %>%
+  
+  tidyr::gather(tree, predicted, -c(observation, actual)) %>%
+  
+  group_by(observation) %>%
+  
+  mutate(tree = stringr::str_extract(tree, '\\d+') %>% as.numeric()) %>%
+  
+  ungroup() %>%
+  
+  arrange(observation, tree) %>%
+  
+  group_by(observation) %>%
+  
+  mutate(avg_prediction = cummean(predicted)) %>%
+  
+  group_by(tree) %>%
+  
+  summarize(RMSE = RMSE(avg_prediction, actual)) %>%
+  
+  ggplot(aes(tree, RMSE)) +
+  
+  geom_line() +
+  
+  xlab('Number of trees')
 ```
 
 
@@ -284,7 +443,7 @@ A random subset of covariates are considered
 # mtry subsets at each parameter to create tree (must be n-1 no. predictors)
 # trees is no. of tree models 
 rf_model <- rand_forest(mtry = tune(),
-                  trees = tune()) %>% 
+                        trees = tune()) %>% 
   # this is a package loaded in libs
   set_engine('ranger') %>% 
   set_mode('classification')
@@ -295,7 +454,7 @@ rf_model <- rand_forest(mtry = tune(),
 # establish wkflw for model
 rf_workflow <- workflow() %>% 
   add_model(rf_model) %>% 
-  add_recipe(fish_recipe)
+  add_recipe(genre_rec)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -304,14 +463,14 @@ rf_workflow <- workflow() %>%
 # use cross validation to tune mtry and treesfor 5 parameters combinations
 # this takes a very long time to run
 rf_cv_tune = rf_workflow %>%
-  tune_grid(resamples = cv_folds,
+  tune_grid(resamples = genre_cv,
             grid = 5) 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                         Finalize Workflow                            ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # store the best tuning metrics
-rf_best = show_best(rf_cv_tune, n = 1, metric = "roc_auc")
+rf_best <- show_best(rf_cv_tune, n = 1, metric = "roc_auc")
 
 # finalize workflow
 rf_final <-  finalize_workflow(rf_workflow,
@@ -323,37 +482,33 @@ rf_final <-  finalize_workflow(rf_workflow,
 # similar functions here.
 
 # fit the KNN model to the training set
-train_fit_rf <- fit(rf_final, train) 
+train_fit_rf <- fit(rf_final, genre_train) 
 
 # get prediction for test 
-test_predict_rf = predict(train_fit_rf, test) %>% 
+test_predict_rf = predict(train_fit_rf, genre_test) %>% 
   # bind to testing column
-  bind_cols(test) %>%  
-  mutate(habitat = as.factor(habitat))
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
 
 # get testing prediction probabilities
-test_predict2_rf = predict(train_fit_rf, test, type = "prob") %>% 
+test_predict2_rf = predict(train_fit_rf,
+                           genre_test,
+                           type = "prob") %>% 
   # bind to testing column
-  bind_cols(test) %>%  
-  mutate(habitat = as.factor(habitat))
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                          Evaluate Model                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # get accuracy of testing prediction
-accuracy(test_predict_rf, truth <- habitat, estimate = .pred_class) 
+accuracy(test_predict_rf, truth <- genre, estimate = .pred_class) 
 
 
 test_roc_auc_rf <- roc_curve(test_predict2_rf,
-                             habitat,
-                             .pred_bathydemersal,
-                             .pred_bathypelagic,
-                             .pred_benthopelagic, 
-                             .pred_demersal, 
-                             .pred_pelagic, 
-                             `.pred_pelagic-neritic`,
-                             `.pred_pelagic-oceanic`,
-                             `.pred_reef-associated`)
+                             genre,
+                             .pred_hardstyle,
+                             .pred_techhouse)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -363,7 +518,7 @@ test_roc_auc_rf <- roc_curve(test_predict2_rf,
 
 # create confusion matrix
 rf_cm <- test_predict_rf %>% 
-  conf_mat(truth = habitat,
+  conf_mat(truth = genre,
            estimate = .pred_class) %>% 
   # plot confusion matrix with heatmap
   autoplot(type = "heatmap") + 
@@ -374,8 +529,10 @@ rf_cm <- test_predict_rf %>%
   #rotate axis labels
   labs(title = "Random Forest")
 
+rf_cm
+
 # ROC model plots
-rf_roc = autoplot(test_roc_auc_rf) +
+rf_roc <- autoplot(test_roc_auc_rf) +
   theme_bw() +
   labs(title = "Random Forest")
 ```
