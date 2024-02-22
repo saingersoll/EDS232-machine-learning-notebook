@@ -1,0 +1,263 @@
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(tidyverse)
+library(tidymodels)
+library(ranger)
+library(spData)
+library(ggpmisc)
+library(vip)
+
+set.seed(5)
+```
+
+```{r}
+redlining = read_csv(here::here("discussion","data", "redlining.csv")) %>% 
+  left_join(us_states_df %>% rename(name = state)) %>% 
+  janitor::clean_names()
+```
+
+### Data Splitting
+
+```{r}
+split <- initial_split(redlining, prop = .7)
+
+train <- training(split)
+test <- testing(split)
+
+# at least 2 repeats at 5 folds
+folds <- vfold_cv(train, v = 5, repeats = 2)
+```
+
+### Recipe Specification
+
+```{r}
+recipe <- recipe(percent ~ region + area + total_pop_10 + median_income_10 + poverty_level_10, data = train) %>%
+  
+  step_normalize(all_numeric_predictors()) %>% 
+  
+  step_dummy(all_nominal_predictors()) %>% 
+  
+  step_interact(terms = ~total_pop_10:median_income_10) %>% 
+  
+  step_interact(terms = ~total_pop_10:poverty_level_10) %>% 
+  
+  step_interact(terms = ~poverty_level_10:median_income_10) 
+```
+
+### Model: Random forest Regression
+
+```{r}
+rf_model <- rand_forest(
+  mtry = tune(),
+  trees = tune()
+) %>% 
+  # search engine then select engine then function to see inputs
+  set_engine('ranger',
+             verbose = TRUE,
+             # what is important, need to specify, default is none
+             importance = "impurity") %>% 
+  # 
+  set_mode('regression')
+```
+
+```{r}
+rf_wkfw <- workflow() %>% 
+  add_model(rf_model) %>% 
+  add_recipe(recipe)
+
+rf_wkfw
+```
+
+### Cross Validation
+
+```{r}
+rf_cv <- rf_wkfw %>% 
+  tune_grid(resamples = folds,
+            grid = 5)
+
+```
+
+```{r}
+autoplot(rf_cv)
+```
+
+```{r}
+rf_final <- finalize_workflow(
+  rf_wkfw,
+  select_best(rf_cv,
+              metric = 'rmse')
+)
+
+rf_final
+```
+
+### Model Fitting
+
+```{r, include=FALSE}
+rf_fit <- fit(rf_final, train) # fit the data to the training data
+```
+
+```{r, include=FALSE}
+train_predict <- predict(object = rf_fit, new_data = train) %>% # predict the training set
+  bind_cols(train) # bind training set column to prediction
+
+test_predict <- predict(object = rf_fit, new_data = test) %>% # predict the training set
+  bind_cols(test) # bind prediction to testing data column
+```
+
+### Example of overfitting
+big difference between training and testing outputs
+```{r}
+train_metrics <- train_predict %>%
+  metrics(percent, .pred) # get testing data metrics
+train_metrics
+
+test_metrics <- test_predict %>%
+  metrics(percent, .pred) # get testing data metrics
+test_metrics
+```
+
+### Visualization
+
+```{r}
+ggplot(train_predict, aes(x = percent, y = .pred)) + # plot ln of real versus ln of predicted
+  geom_point() +
+  stat_poly_line() +
+  stat_poly_eq(use_label("eq")) +
+  stat_poly_eq(label.y = 0.9) +
+  theme_bw() +
+  labs(
+    x = "Observed",
+    y = "Predicted"
+  ) +
+  theme(text = element_text(size = 10))
+
+```
+
+```{r}
+
+ggplot(test_predict, aes(x = percent, y = .pred)) + # plot ln of real versus ln of predicted
+  geom_point() +
+  stat_poly_line() +
+  stat_poly_eq(use_label("eq")) +
+  stat_poly_eq(label.y = 0.9) +
+  theme_bw() +
+  labs(
+    x = "Observed",
+    y = "Predicted"
+  ) +
+  theme(text = element_text(size = 10))
+```
+
+### Recipe Re-Specification
+
+Removing variables causing overfitting
+
+```{r}
+# iMPORTANCE OF SPLITTING NODES BASED ON GINI IMPURITY
+rf_fit %>% 
+  extract_fit_parsnip() %>% 
+  # gg-esc plot
+  vip() +
+  theme_bw()
+```
+
+```{r}
+recipe2 <- recipe(percent ~ area + total_pop_10 + median_income_10 + poverty_level_10, data = train) %>%
+  
+  step_normalize(all_numeric_predictors()) %>% 
+  
+  step_dummy(all_nominal_predictors()) %>% 
+  
+  step_interact(terms = ~total_pop_10:median_income_10) %>% 
+  
+  step_interact(terms = ~poverty_level_10:median_income_10) 
+```
+
+### Model: Random forest Regression
+
+```{r}
+rf_model <- rand_forest(mtry = tune(), trees = tune()) %>%
+  
+  set_engine("ranger", verbose = TRUE, importance = "impurity") %>% 
+  
+  set_mode("regression")
+```
+
+```{r}
+rf_wflw2 <- workflow() %>%
+  add_model(rf_model) %>%
+  add_recipe(recipe2)
+
+rf_wflw2
+```
+
+### Cross Validation
+```{r}
+# assess hyperparameter bounds
+mtry() %>% 
+  range_get()
+
+trees() %>% 
+  range_get()
+```
+
+```{r}
+my_grid <- expand.grid(mtry = seq(2, 6, length.out = 5),
+                       trees = round(seq(50, 2000, length.out = 10)))
+
+
+```
+
+```{r}
+autoplot(rf_cv)
+```
+
+```{r}
+
+```
+
+### Model Fitting
+
+```{r, include=FALSE}
+rf_fit <- fit(rf_final, train) # fit the data to the training data
+```
+
+```{r, include=FALSE}
+train_predict <- predict(object = rf_fit, new_data = train) %>% # predict the training set
+  bind_cols(train) # bind training set column to prediction
+
+test_predict <- predict(object = rf_fit, new_data = test) %>% # predict the training set
+  bind_cols(test) # bind prediction to testing data column
+```
+
+```{r}
+train_metrics <- train_predict %>%
+  metrics(percent, .pred) # get testing data metrics
+train_metrics
+
+test_metrics <- test_predict %>%
+  metrics(percent, .pred) # get testing data metrics
+test_metrics
+```
+
+### Visualization
+
+```{r}
+ggplot(train_predict, aes(x = percent, y = .pred)) + # plot ln of real versus ln of predicted
+  geom_point() +
+  stat_poly_line() +
+  stat_poly_eq(use_label("eq")) +
+  stat_poly_eq(label.y = 0.9) +
+  theme_bw() +
+  labs(
+    x = "Observed",
+    y = "Predicted"
+  ) +
+  theme(text = element_text(size = 10))
+```
+
+```{r}
+
+```
