@@ -2,7 +2,8 @@
 title: "Lab5"
 author: "Sofia Ingersoll"
 date: "2023-02-07"
-output: html_document
+output: 
+  html_document
 ---
 
 This week's lab is a musical lab. You'll be requesting data from the Spotify API and using it to build k-nearest neighbor and decision tree models.
@@ -93,7 +94,7 @@ Compare the performance of the four final models you have created.
 Use appropriate performance evaluation metric(s) for this classification task. A table would be a good way to display your comparison. Use at least one visualization illustrating your model results.
 
 ## Libraries
-```{r}
+```{r message = FALSE, warning = FALSE}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                         System Set Up                                ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -114,12 +115,17 @@ library(parsnip)
 library(doParallel)  # for parallel backend to foreach
 library(foreach)     # for parallel processing with for loops
 library(caret)       # for general model fitting
+library(vip)
+library(baguette)
+library(sjPlot)
+library(kableExtra)
+library(patchwork)
 
 set.seed(99)          # set random seed
 ```
 
 ## Loading and Splitting Data
-```{r}
+```{r message = FALSE}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                       Load & Clean Data                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -208,7 +214,7 @@ final_wf <- wf_knn_tune %>%
   finalize_workflow(select_best(fit_knn_cv, metric = "accuracy"))
 
 # Check out the final workflow object.  Choosing accuracy for interpretability in this simple binary context, mine found that 20 neighbors was most accurate 
-final_wf
+#final_wf
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                             Fit Model                                ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -217,7 +223,21 @@ final_wf
 final_fit <- final_wf %>%  
   fit(data = genre_train)
 # Examine the final workflow
-final_fit
+#final_fit
+
+# get prediction for test 
+test_predict_knn <- predict(final_fit, genre_test) %>% 
+  # bind to testing column
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
+
+# get testing prediction probabilities
+test_predict_knn2 <- predict(final_fit,
+                             genre_test,
+                             type = "prob") %>% 
+  # bind to testing column
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                          Evaluate Model                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -225,7 +245,9 @@ final_fit
 genre_knn_pred <- final_fit %>%  
   predict(new_data = genre_test)
 
-genre_knn_pred
+
+# get accuracy of testing prediction
+knn_accuracy <- accuracy(test_predict_knn, truth = genre, estimate = .pred_class) 
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -237,6 +259,9 @@ final_fit <- final_wf %>%
   last_fit(genre_split)
 # Collect metrics on the test data!
 final_fit %>%  collect_metrics()
+
+autoplot(fit_knn_cv) +
+  theme_bw()
 ```
 
 
@@ -266,6 +291,7 @@ tree_grid <- grid_regular(cost_complexity(),
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                           Workflow                                   ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create workflow
 wf_tree_tune <- workflow() %>% 
   add_recipe(genre_rec) %>% 
   add_model(tree_spec_tune)
@@ -294,12 +320,6 @@ system.time(
 )
 
 #tree_rs
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                    Visualize Parallel Trees                          ----
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# visualize our parallel trees model
-autoplot(tree_rs) +
-  theme_bw()
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                         Finalize Workflow                            ----
@@ -315,10 +335,26 @@ final_tree <- finalize_workflow(wf_tree_tune,
 final_tree_fit <- fit(final_tree,
                       data = genre_train) 
 
-# last_fit() fits on the training data but then also evaluates on test data
-# this combines fit and predict
-final_tree_result <- last_fit(final_tree,
-                              genre_split)
+# get prediction for test 
+test_predict_tree <- predict(final_tree_fit, genre_test) %>% 
+  # bind to testing column
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
+
+# get testing prediction probabilities
+test_predict_tree2 <- predict(final_tree_fit,
+                              genre_test,
+                              type = "prob") %>% 
+  # bind to testing column
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+tree_accuracy <- accuracy(test_predict_tree, truth = genre, estimate = .pred_class) 
+
+#tree_accuracy
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                        Visual of Fit Model                          ----
@@ -330,107 +366,115 @@ final_tree_fit %>%
       alpha = 0.8) +
   scale_y_continuous(expand = c(0,0)) 
 
-
-predict_data <- as.data.frame(final_tree_result$.predictions) %>% 
-  bind_cols(genre_test)
-
-ggplot() +
-  geom_boxplot(data = predict_data,
-               aes(.pred_class,
-                   duration_ms))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                    Visualize Parallel Trees                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize our parallel trees model
+autoplot(tree_rs) +
+  theme_bw()
 ```
 
 
 # Bagged Tree
 
 All covariates are considered
+
+bag_tree
+
 ```{r}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                      Tuning Bagged Tree                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # train bagged model
-bagged_spec <- bagging(
-  formula = genre ~ .,
-  data = genre_train,
-  # set the number of trees to be 50, set_engine('rpart',times = 50) was not working
-  nbagg = 50,  
-  coob = TRUE,
-  # min no. of observations required at each node prior to splitting
-  control = rpart.control(minsplit = 2, cp = 0)
-) 
+# new spec, tell the model that we are tuning hyperparams
+bagged_spec_tune <- bag_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) %>% 
+  set_engine('rpart', times = 50) %>% 
+  set_mode('classification')
+
+# info about the possible range of this hyperparameter values
+# 5 x 5 x 5 grid of the parameters for cross validation
+bagged_grid <- grid_regular(cost_complexity(),
+                            tree_depth(),
+                            min_n(),
+                            levels = 5)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Workflow                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+wf_bagged_tune <- workflow() %>% 
+  add_recipe(genre_rec) %>% 
+  add_model(bagged_spec_tune)
+
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Cross Validation                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#set up k-fold cv. This can be used for all the algorithms
+genre_cv <- genre_train %>% 
+  vfold_cv(v = 10)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Parallel Bags                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# in parallel, create a set of decision trees
+doParallel::registerDoParallel() 
+
+system.time(
+  bagged_rs <- tune_grid(
+    wf_bagged_tune,
+    resamples = genre_cv,
+    grid = bagged_grid,
+    metrics = metric_set(accuracy)
+  )
+)
+
+#tree_rs
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# finalize workflow using the best tree and tuning
+final_bagged <- finalize_workflow(wf_bagged_tune,
+                                  select_best(bagged_rs))
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                             Fit Model                                ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# Create a parallel socket cluster
-cl <- makeCluster(8) # use 8 workers
-registerDoParallel(cl) # register the parallel backend
+#similar functions here.
+final_bagged_fit <- fit(final_bagged,
+                        data = genre_train) 
 
-# Fit trees in parallel and compute predictions on the test set
-predictions <- foreach(
-  icount(160), 
-  .packages = "rpart", 
-  .combine = cbind
-  ) %dopar% {
-    # bootstrap copy of training data
-    index <- sample(nrow(genre_train), replace = TRUE)
-    genre_train_boot <- genre_train[index, ]  
-  
-    # fit tree to bootstrap copy
-    bagged_tree <- rpart(
-      genre ~ ., 
-      control = rpart.control(minsplit = 2, cp = 0),
-      data = genre_train_boot
-      ) 
-    
-    predict(bagged_tree, newdata = genre_test)
-}
+# get prediction for test 
+test_predict_bagged <- predict(final_bagged_fit, genre_test) %>% 
+  # bind to testing column
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
 
-predictions[1:5, 1:7]
-
+# get testing prediction probabilities
+test_predict_bagged2 <- predict(final_bagged_fit,
+                                genre_test,
+                                type = "prob") %>% 
+  # bind to testing column
+  bind_cols(genre_test) %>%  
+  mutate(genre = as.factor(genre))
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                          Evaluate Model                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # get accuracy of testing prediction
+bagged_accuracy <- accuracy(test_predict_bagged, truth = genre, estimate = .pred_class) 
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                        Visual of Fit Model                          ----
+# ----                    Visualize Parallel Trees                          ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-predictions %>%
-  as.data.frame() %>%
-  
-  mutate(
-    observation = 1:n(),
-    
-    actual = genre_test$genre) %>%
-  
-  tidyr::gather(tree, predicted, -c(observation, actual)) %>%
-  
-  group_by(observation) %>%
-  
-  mutate(tree = stringr::str_extract(tree, '\\d+') %>% as.numeric()) %>%
-  
-  ungroup() %>%
-  
-  arrange(observation, tree) %>%
-  
-  group_by(observation) %>%
-  
-  mutate(avg_prediction = cummean(predicted)) %>%
-  
-  group_by(tree) %>%
-  
-  summarize(RMSE = RMSE(avg_prediction, actual)) %>%
-  
-  ggplot(aes(tree, RMSE)) +
-  
-  geom_line() +
-  
-  xlab('Number of trees')
+# visualize our parallel bagged trees model
+autoplot(bagged_rs) +
+  theme_bw()
 ```
-
 
 # Random Forest
 
@@ -502,15 +546,15 @@ test_predict2_rf = predict(train_fit_rf,
 # ----                          Evaluate Model                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # get accuracy of testing prediction
-accuracy(test_predict_rf, truth <- genre, estimate = .pred_class) 
+rf_accuracy <- accuracy(test_predict_rf, truth = genre, estimate = .pred_class) 
 
-
-test_roc_auc_rf <- roc_curve(test_predict2_rf,
-                             genre,
-                             .pred_hardstyle,
-                             .pred_techhouse)
-
-
+test_predict_rf_num <- as.numeric(test_predict_rf$genre) %>% 
+  as.numeric(test_predict_rf$.pred_class)
+           
+#rf_roc <- roc_curve(test_predict_rf_num,
+ #                   genre,
+  #                  .pred_class)
+#rf_accuracy
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                        Visual of Fit Model                          ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -530,13 +574,149 @@ rf_cm <- test_predict_rf %>%
   labs(title = "Random Forest")
 
 rf_cm
+```
 
-# ROC model plots
-rf_roc <- autoplot(test_roc_auc_rf) +
-  theme_bw() +
+# Comparing Model Accuracies 
+
+When comparing the accuracy of the four models, the Random Forest ML Model produced the highest accuracy of 725 hardstyle (hs) : 721 techhnouse (th) predictions properly assigned, as seen in the visual below. Bagged Trees is the second most accurate with 724 hs : 721 th.  Decision tree is next will accuracy of 722 hs : 714 th. The least accurate in its predictions is the KNN model with 713 hs : 711 th properly assigned predictions. 
+
+```{r}
+ m1 = test_predict_rf %>% 
+  conf_mat(truth = genre, estimate = .pred_class) %>% #create confusion matrix
+  autoplot(type = "heatmap") + #plot confusion matrix with heatmap
+  theme_bw() + #change theme
+  theme(axis.text.x = element_text(angle = 30, hjust=1)) +
+  #rotate axis labels
   labs(title = "Random Forest")
+
+ m2 = test_predict_knn %>% 
+  conf_mat(truth = genre, estimate = .pred_class) %>% #create confusion matrix
+  autoplot(type = "heatmap") + #plot confusion matrix with heatmap
+  theme_bw() + #change theme
+  theme(axis.text.x = element_text(angle = 30, hjust=1)) +
+  #rotate axis labels
+  labs(title = "KNN")
+ 
+ m3 =  test_predict_bagged %>% 
+  conf_mat(truth = genre, estimate = .pred_class) %>% #create confusion matrix
+  autoplot(type = "heatmap") + #plot confusion matrix with heatmap
+  theme_bw() + #change theme
+  theme(axis.text.x = element_text(angle = 30, hjust=1)) +
+  #rotate axis labels
+  labs(title = "Bagged Trees")
+ 
+ m4 =  test_predict_tree %>% 
+  conf_mat(truth = genre, estimate = .pred_class) %>% #create confusion matrix
+  autoplot(type = "heatmap") + #plot confusion matrix with heatmap
+  theme_bw() + #change theme
+  theme(axis.text.x = element_text(angle = 30, hjust=1)) +
+  #rotate axis labels
+  labs(title = "Decision Tree")
+ 
+
+m1 + m2 + m3 + m4
 ```
 
 
+```{r include = FALSE}
+# library
+#library(pixiedust)
+# combine accuracy metrics into df 
+#accuracy_df <- rbind(c(knn_accuracy, bagged_accuracy, tree_accuracy, rf_accuracy)) 
+
+
+#dust(accuracy_df) %>% 
+  #sprinkle(col = c(3,6,9,12, round = 3)) %>% 
+   #          sprinkle_colnames(.estimate = "KNN",
+    #                           .estimate.1 = "Bagged",
+     #                          .estimate.2 = "Decision Tree",
+      #                         .estimate.3 = "Random Forest") %>%  
+  #kable %>% 
+  #kable_styling()
+
+# subset accuracies
+#knn_a <- accuracy_df[3]
+#bagged_a <- accuracy_df[6]
+#tree_a <- accuracy_df[9]
+#rf_a <- accuracy_df[12]
+
+#matrix(c(accuracy_df[3], accuracy_df[6], accuracy_df[9], accuracy_df[12]),
+#       nrow = 4,
+ #      ncol=2)
+
+#accuracy_tab <- cbind(list(knn_a,
+ #                          bagged_a,
+                      #     tree_a,
+                       #    rf_a))
+#accuracy_df <- accuracy_df %>% 
+# case_when(c(
+#  .estimate ~ knn_acc,
+# .estimate.1, ~  bagged_acc,
+#.estimate.2, ~ tree_acc,
+#  .estimate.3 ~ rf_acc))
+
+#accuracy_df
+
+# Creating a table for html output using kable and kableExtra
+#knn_acc <- knitr::kable(accuracy_df$.estimate, 
+          #              format = "html",
+                        # halting my render
+                        #col.names = "Estimate", 
+                        #valign = "t",
+                 #       caption = "KNN ML Model Accuracy") %>% 
+#  kable_styling(font_size = 16)
+
+# bagged acc            
+#bagged_acc <- knitr::kable(accuracy_df[6], 
+                  #         format = "html",
+                           #  col.names = 'Estimate', 
+                           #  valign = 't',
+                    #       caption = "Bagged Tree ML Model Accuracy") %>% 
+  
+ # kable_styling(font_size = 16)  
+
+
+# dt acc      
+#tree_acc <- knitr::kable(accuracy_df[9], 
+       #                  format = "html",
+      #                   # col.names = 'Estimate', 
+                         # valign = 't',
+        #                 caption = "Decision Tree ML Model Accuracy") %>% 
+  
+ # kable_styling(font_size = 16)  
+
+
+
+#  rf     
+#rf_acc <- knitr::kable(accuracy_df[12], 
+  #                     format = "html",
+                       # col.names = 'Estimate', 
+                       #valign = 't',
+    #                   caption = "Random Forest ML Model Accuracy") %>% 
+  #
+ # kable_styling(font_size = 16) 
+
+# funky when rendered
+#accuracy_table <- knitr::kables(
+
+# knn acc
+# list( 
+#      knn_acc,
+#     bagged_acc,
+#    tree_acc,
+#   rf_acc
+#  ),
+
+# caption = "Comparing Categorical ML Model Accuracies"
+#)
+
+#accuracy_table
+
+#knn_acc
+#bagged_acc
+#tree_acc
+#rf_acc
+
+```
 
 
