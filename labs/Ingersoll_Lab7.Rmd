@@ -1,0 +1,319 @@
+---
+title: "Clustering Lab"
+author: "Sofia Ingersoll"
+date: "2024-02-29"
+output: html_document
+---
+
+```{r, echo = TRUE, eval = TRUE, message=FALSE, warning=FALSE}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----          System Settings          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
+
+library(tidyverse) 
+library(cluster)       # cluster analysis
+library(factoextra)    # cluster visualization
+library(tidymodels)    # simulation 
+library(readr)         # read data
+library(RColorBrewer)  # Color palettes
+
+# Set the parameters of our simulated data
+set.seed(101)
+```
+
+We'll start off with some simulated data that has a structure that is amenable to clustering analysis.
+
+```{r init_sim}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----         Creating a tibble         ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+cents <- tibble(
+  cluster = factor(1:3),
+  num_points = c(100, 150, 50),
+  x1 = c(5,0, -3),
+  x2 = c(-1, 1, -2)
+)
+```
+
+Defining cluster parameters.
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----    Cluster Grouping Identities    ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# use this to generate all random space points
+# each point starts with these centers
+# in future chunks we will add noise to these grouping identies
+cluster = factor(1:3)
+num_points = c(100, 150, 50)
+x1 = c(5,0,-3)
+x2 = c(-1,1,-2)
+```
+
+Randomly map clusters & unnest points.
+```{r sim}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----       Assign random clusters      ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Simulate the data by passing n and mean to rnorm using map2()
+labelled_points <- 
+  cents %>%  mutate(
+    x1 = map2(num_points, x1, rnorm),
+    x2 = map2(num_points, x2, rnorm),
+  ) %>% 
+  select(-num_points) %>% 
+  unnest(c(x1, x2))
+```
+
+Visualize these random clusters
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Visualize random clusters     ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualizing the cluster
+ggplot(labelled_points,
+       aes(x1,
+           x2,
+           color = cluster)) +
+  geom_point(alpha = 0.4)
+```
+
+
+Applying kmeans clustering to our data points
+
+```{r kmeans}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Isolating points to cluster   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+points <- 
+  labelled_points %>% 
+  select(-cluster)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     kmeans clustering points      ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# for kmeans clustering, apply the data & the desired number of clusters
+# run the model n number of times with differen, random starting points
+kcluster <- kmeans(points, 
+                   center = 3,
+                   n = 25)
+
+kcluster
+```
+When you don't know the number of clusters, it's best to take a tuning approach. Trying a wide spread of k values to determine the best k. We have not unnested, only produced a list of lists. Each cell in this output contains a tibble.
+
+```{r syst_k}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Testing a Set of K Values     ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#now let's try a systematic method for setting k
+kclust <- tibble(k = 1:9) %>% 
+  mutate(
+    # points in our data and a single list of k values is to be mapped
+    kcluster = map(k, ~kmeans(points, .x)),
+    augmented = map(kcluster, augment, points)
+  )
+
+kclust
+```
+Append cluster assignments
+```{r assign}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----           Append cluster          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# append cluster assignment to tibble
+# unnest model results
+# unnesting extrapolates the lists stored within each cell
+assignments <- kclust %>% 
+  unnest(cols = c(augmented))
+
+```
+Visualize cluster assignments for a sequence of k (1:9)
+```{r plot_9_clust}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Visualize kmeans clusters     ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Plot each model 
+p1 <- ggplot(assignments,
+             aes(x = x1,
+                 y = x2)) +
+  geom_point(aes(color = .cluster),
+             alpha = 0.8) +
+  scale_color_brewer(palette = "Set1") +
+  facet_wrap(~k)
+
+p1
+```
+Determine the Elbow
+```{r elbow}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----          Visualize Tot WSS        ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Use a clustering function from {factoextra} to plot  total WSSs
+# 15 different types of k
+# WSS : Total Within Sum of Squares
+fviz_nbclust(points,
+             kmeans,
+             "wss")
+```
+Visualize 3 k-clusters
+Center of the centroid is observed in the center of each colored cluster, it is the largest point.
+```{r more_fviz}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----         kmeans clustering         ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Another plotting method
+k3 <- kmeans(points,
+             centers = 3,
+             nstart = 25)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Visualize kmeans cluster      ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+p3 <- fviz_cluster(k3,
+                   geom = "point",
+                   data = points) +
+  ggtitle("K-Means Clustering",
+          subtitle = "k = 3 ")
+
+p3
+```
+
+
+In-class assignment!
+
+Now it's your turn to partition a dataset.  For this round we'll use data from Roberts et al. 2008 on bio-contaminants in Sydney Australia's Port Jackson Bay.  The data are measurements of metal content in two types of co-occurring algae at 10 sample sites around the bay.
+
+```{r data}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----      Data Read & Wrangle          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Read in data
+metals_dat <- readr::read_csv(here::here("data", "Harbour_metals.csv"),
+                              show_col_types = FALSE)
+
+# Inspect the data
+# str(metals_dat)
+
+# Grab pollutant variables
+metals_dat2 <- metals_dat[, 4:8] 
+```
+1. Start with k-means clustering - kmeans().  You can start with fviz_nbclust() to identify the best value of k. Then plot the model you obtain with the optimal value of k. 
+
+Do you notice anything different about the spacing between clusters?  Why might this be?
+
+When determining the number of clusters using `fviz_nbclust()` to visualize the cluster sum of squares, its easy to observe the 'elbow' shape occuring at k = 3. This indicates that we likely have 3 clusters in our dataset. When plotting k = 3, an overlap is observed between cluster 2 and cluster 3. Even though our elbow indicates that 3 is the ideal number of clusters, the overlap that is observed above indicates to me that maybe more than 3 clusters are needed? 
+
+Personal Notes: The total amount of variation being shown is the sum of the axes dimensions. The axes take in consideration the amount of data that is accurately represented by each axis dimension. (Think R2). Percent of variation across the 5-D that is represented in each dimension.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----           Tuning for  K           ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#Use a clustering function from {factoextra} to plot  total WSSs
+# 15 different types of k
+# WSS : Total Within Sum of Squares
+fviz_nbclust(metals_dat2,
+             kmeans,
+             "wss") 
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----       Visualizing k = 3           ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Another plotting method for k = 3
+metal_kmeans <- kmeans(metals_dat2,
+                       centers = 3,
+                       nstart = 25)
+
+metal_p <- fviz_cluster(metal_kmeans,
+                        geom = "point",
+                        data = metals_dat2) +
+  ggtitle("K-Means Clustering",
+          subtitle = "k = 3 ")
+
+metal_p
+```
+Run summary() on your model object.  Does anything stand out?
+
+There are 3 clusters total with the sizes 22, 10, and 28. The within cluster sum of squares by cluster is 80.4%. The majority of data points are located in cluster 2 which is interesting. 
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Inspecting Summarized Info    ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+metal_kmeans
+```
+
+2. Good, now let's move to hierarchical clustering that we saw in lecture. The first step for that is to calculate a distance matrix on the data (using dist()). Euclidean is a good choice for the distance method.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----        Distance Matrix            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# use the distm function to generate a distance matrix 
+dist_matrix <- dist(metals_dat2,
+                    method = 'euclidean')
+```
+
+3. Use tidy() on the distance matrix so you can see what is going on. What does each row in the resulting table represent?
+
+The column item2 seems to indicate the cluster number associated with 
+The distance column represents the distance between the rows of data. 
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----       Tidy Distance Matrix        ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+tidy(dist_matrix)
+```
+
+4. Then apply hierarchical clustering with hclust().
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----           hclustering             ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+metal_hclust <- hclust(dist_matrix,
+                       method = 'complete')
+```
+
+5. Now plot the clustering object. You can use something of the form plot(as.dendrogram()).  Or you can check out the cool visual options here: https://rpubs.com/gaston/dendrograms
+
+How does the plot look? Do you see any outliers?  How can you tell?  
+
+It is clear to see there are three distinct clusters. The plot has a relatively even distribution of data, but the green cluster is the largest. In terms of outliers, the leaf nodes that contain very few data points (i.e. < 5), indicate that not every data point could be groups amongst the cluster majorities. 
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Dendorgram of hcluster        ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Construct dendorgram for the hclust
+dend_plot <- fviz_dend(metal_hclust,
+                       # how many main branching groups to color by
+                       k = 3,
+                       # color by cluster groups 
+                       color_labels_by_k = TRUE,
+                       # reduce the size of the leaf node output txt 
+                       cex = 0.6) +
+  # add title
+  ggtitle("Hierarchial Clustering Pollutants",
+          subtitle = "k = 3 ")
+
+# view plot
+dend_plot
+
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+#----     Dendorgram hcluster data      ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# extrapolate dendrogram plot info
+dend_data <- attr(dend_plot, "dendrogram")
+dend_data
+```
+
+
+
