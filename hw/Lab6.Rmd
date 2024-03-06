@@ -24,6 +24,8 @@ library(tidymodels)    # modeling
 library(xgboost)       # package for boosted trees
 library(ranger)        # package for random forest non-default external package
 library(patchwork)
+library(parsnip)
+library(doParallel)  # for parallel backend to foreach
 
 set.seed(99)           # set random seed
 ```
@@ -40,13 +42,16 @@ https://github.com/MaRo406/eds-232-machine-learning/blob/main/data
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # read in eel model training data 
 train_data <- read_csv(here("data", "eel.model.data.csv"),
-                       show_col_types = FALSE) 
+                       show_col_types = FALSE) %>% 
+  mutate(Angaus = as.factor(Angaus)) %>% 
+  mutate(Method = as.factor(Method))
 
 # read in eel model eval data
 eval_dat <- read_csv(here("data", "eel.eval.data.csv"),
-                     show_col_types = FALSE) 
+                     show_col_types = FALSE) %>% 
+  mutate(Angaus = as.factor(Angaus_obs)) %>% 
+  mutate(Method = as.factor(Method))
 ```
-
 
 ### Split and Resample
 
@@ -90,8 +95,6 @@ eel_recipe <- recipe(DSDam ~ .,
                      data = train) %>%  
   # remove these selected variables 
   step_rm(Site) %>% 
-  # turn all categorical predictors to a binary variable using 0 or 1
-  step_integer(Method, zero_based = T) %>%
   # create dummy variables from all factors
   step_dummy(all_nominal_predictors()) %>%   
   # normalize all numeric predictors
@@ -116,11 +119,7 @@ learn_rate is the rate that the algorithm adapts between each tree iteration
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # creating a boosted tree and tuning for the hyperparam learn_rate
 xgb_spec <- boost_tree(learn_rate = tune(),
-                       trees = 3000#,
-                       #tree_depth = tune(),
-                       #min_n = tune(),
-                       #reduction_loss = tune()
-) %>% 
+                       trees = 3000) %>% 
   set_engine('xgboost') %>% 
   set_mode('classification')
 
@@ -145,19 +144,15 @@ xgb_workflow
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                          Tune Grid                                   ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# establish grid to tune learn_rate
+xgb_grid <- expand.grid(learn_rate = seq(0.0001, 0.3, length.out = 30))
 
-xgb_grid <- expand.grid(mtry = seq(0.0001, 0.3,
-                                   length.out = 30),
-                        trees = round(seq(50, 3000, length.out = 10)))
-
-doParallel::registerDoParallel() 
 
 system.time(
-  xgb_rs <- tune_grid(
+  xgb_cv_tune <- tune_grid(
     xgb_workflow,
     resamples = cv_folds,
-    grid = xgb_grid,
-    metrics = metric_set(accuracy)          
+    grid = xgb_grid        
   )
 )
 ```
@@ -168,14 +163,15 @@ system.time(
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                     Collect Metrics                                  ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-collect_metrics(xgb_tune) # get metrics from tuning cv to pick best model
+collect_metrics(xgb_cv_tune) # get metrics from tuning cv to pick best model
 
-autoplot(xgb_tune) +      # plot cv results for parameter tuning
+autoplot(xgb_grid) +      # plot cv results for parameter tuning
   theme_bw()
 
-best_learn <- select_best(xgb_tune$learn_rate)
+best_learn <- show_best(xgb_cv_tune,
+                        n = 3,
+                        metric = "roc_auc")
 ```
-
 
 ### Tune Tree Parameters
 
@@ -200,7 +196,6 @@ xgb_workflow_tune <- workflow() %>%
 
 xgb_workflow_tune
 ```
-
 
 2.  Set up a tuning grid. This time use grid_latin_hypercube() to get a representative sampling of the parameter space
 
