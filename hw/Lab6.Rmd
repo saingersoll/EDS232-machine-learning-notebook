@@ -30,6 +30,55 @@ library(doParallel)  # for parallel backend to foreach
 set.seed(99)           # set random seed
 ```
 
+### Preprocess
+
+Create a recipe to prepare your data for the XGBoost model
+
+```{r xgb-recipe}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Prep Data for Models                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create model recipe
+eel_recipe <- recipe(DSDam ~ .,
+                     data = train) %>%  
+  # remove these selected variables 
+  step_rm(Site) %>% 
+  # create dummy variables from all factors
+  step_dummy(all_nominal_predictors()) %>%   
+  # normalize all numeric predictors
+  step_normalize(all_numeric_predictors())  
+```
+
+### Split and Resample
+
+Split the model data (eel.model.data.csv) into a training and test set, stratified by outcome score (Angaus). Use 10-fold CV to resample the training set.
+
+```{r split-resample}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Split Data                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# split the data stratified by Angaus
+train_split <- initial_split(train_data,
+                             strata = Angaus,
+                             prop = .8)
+
+# traing data
+train <- training(train_split)
+
+# testing data
+test <- testing(train_split)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                       Cross Val Folds                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create 10 cv folds stratified by outcome score
+cv_folds <- vfold_cv(train, 
+                     v = 10,
+                     #strata = Angaus
+                     )
+```
+
 ## Data
 
 Grab the training and evaluation data sets (eel.model.data.csv, eel.eval.data.csv) from github here:
@@ -53,53 +102,6 @@ eval_dat <- read_csv(here("data", "eel.eval.data.csv"),
   mutate(Method = as.factor(Method))
 ```
 
-### Split and Resample
-
-Split the model data (eel.model.data.csv) into a training and test set, stratified by outcome score (Angaus). Use 10-fold CV to resample the training set.
-
-```{r}
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                         Split Data                                   ----
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# split the data stratified by Angaus
-train_split <- initial_split(train_data,
-                             strata = Angaus,
-                             prop = .8)
-
-# traing data
-train <- training(train_split)
-
-# testing data
-test <- testing(train_split)
-
-
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                       Cross Val Folds                                ----
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# create 10 cv folds stratified by outcome score
-cv_folds <- vfold_cv(train, 
-                     v = 10,
-                     strata = Angaus)
-```
-
-### Preprocess
-
-Create a recipe to prepare your data for the XGBoost model
-
-```{r}
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                      Prep Data for Models                            ----
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# create model recipe
-eel_recipe <- recipe(DSDam ~ .,
-                     data = train) %>%  
-  # remove these selected variables 
-  step_rm(Site) %>% 
-  # create dummy variables from all factors
-  step_dummy(all_nominal_predictors()) %>%   
-  # normalize all numeric predictors
-  step_normalize(all_numeric_predictors())  
-```
 
 ## Tuning XGBoost
 
@@ -135,7 +137,6 @@ xgb_workflow <- workflow() %>% # create workflow
 xgb_workflow
 ```
 
-
 2.  Set up a grid to tune your model by using a range of learning rate parameter values: expand.grid(learn_rate = seq(0.0001, 0.3, length.out = 30))
 
 -   Use appropriate metrics argument(s) - Computational efficiency becomes a factor as models get more complex and data get larger. Record the time it takes to run. Do this for each tuning phase you run. You could use {tictoc} or Sys.time().
@@ -163,7 +164,7 @@ system.time(
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                     Collect Metrics                                  ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-collect_metrics(xgb_cv_tune) # get metrics from tuning cv to pick best model
+#collect_metrics(xgb_cv_tune) # get metrics from tuning cv to pick best model
 
 autoplot(xgb_grid) +      # plot cv results for parameter tuning
   theme_bw()
