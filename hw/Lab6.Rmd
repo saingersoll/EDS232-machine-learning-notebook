@@ -30,23 +30,27 @@ library(doParallel)  # for parallel backend to foreach
 set.seed(99)           # set random seed
 ```
 
-### Preprocess
+## Data
 
-Create a recipe to prepare your data for the XGBoost model
+Grab the training and evaluation data sets (eel.model.data.csv, eel.eval.data.csv) from github here:
+https://github.com/MaRo406/eds-232-machine-learning/blob/main/data 
 
-```{r xgb-recipe}
+
+```{r}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                      Prep Data for Models                            ----
+# ----                         Load Data                                    ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# create model recipe
-eel_recipe <- recipe(DSDam ~ .,
-                     data = train) %>%  
-  # remove these selected variables 
-  step_rm(Site) %>% 
-  # create dummy variables from all factors
-  step_dummy(all_nominal_predictors()) %>%   
-  # normalize all numeric predictors
-  step_normalize(all_numeric_predictors())  
+# read in eel model training data 
+train_data <- read_csv(here("data", "eel.model.data.csv"),
+                       show_col_types = FALSE) %>% 
+  mutate(Angaus = as.factor(Angaus)) %>% 
+  mutate(Method = as.factor(Method))
+
+# read in eel model eval data
+eval_dat <- read_csv(here("data", "eel.eval.data.csv"),
+                     show_col_types = FALSE) %>% 
+  mutate(Angaus = as.factor(Angaus_obs)) %>% 
+  mutate(Method = as.factor(Method))
 ```
 
 ### Split and Resample
@@ -79,27 +83,23 @@ cv_folds <- vfold_cv(train,
                      )
 ```
 
-## Data
+### Preprocess
 
-Grab the training and evaluation data sets (eel.model.data.csv, eel.eval.data.csv) from github here:
-https://github.com/MaRo406/eds-232-machine-learning/blob/main/data 
+Create a recipe to prepare your data for the XGBoost model
 
-
-```{r}
+```{r xgb-recipe}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                         Load Data                                    ----
+# ----                      Prep Data for Models                            ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# read in eel model training data 
-train_data <- read_csv(here("data", "eel.model.data.csv"),
-                       show_col_types = FALSE) %>% 
-  mutate(Angaus = as.factor(Angaus)) %>% 
-  mutate(Method = as.factor(Method))
-
-# read in eel model eval data
-eval_dat <- read_csv(here("data", "eel.eval.data.csv"),
-                     show_col_types = FALSE) %>% 
-  mutate(Angaus = as.factor(Angaus_obs)) %>% 
-  mutate(Method = as.factor(Method))
+# create model recipe
+eel_recipe <- recipe(Angaus ~ .,
+                     data = train) %>%  
+  # remove these selected variables 
+  step_rm(Site) %>% 
+  # create dummy variables from all factors
+  step_dummy(all_nominal_predictors()) %>%   
+  # normalize all numeric predictors
+  step_normalize(all_numeric_predictors())  
 ```
 
 
@@ -148,6 +148,8 @@ xgb_workflow
 # establish grid to tune learn_rate
 xgb_grid <- expand.grid(learn_rate = seq(0.0001, 0.3, length.out = 30))
 
+# in parallel, tune grid params 
+doParallel::registerDoParallel() 
 
 system.time(
   xgb_cv_tune <- tune_grid(
@@ -166,12 +168,14 @@ system.time(
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 #collect_metrics(xgb_cv_tune) # get metrics from tuning cv to pick best model
 
-autoplot(xgb_grid) +      # plot cv results for parameter tuning
+autoplot(xgb_cv_tune)  +      # plot cv results for parameter tuning
   theme_bw()
 
 best_learn <- show_best(xgb_cv_tune,
-                        n = 3,
+                        n = 1,
                         metric = "roc_auc")
+
+best_learn
 ```
 
 ### Tune Tree Parameters
@@ -204,17 +208,19 @@ xgb_workflow_tune
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                      Tune LHC Grid                                   ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-xgb_lhc_grid <- grid_latin_hypercube(mtry = tune(),
-                                     trees = tune())
+# add lect 6 params
+xgb_lhc_grid <- grid_latin_hypercube(learn_rate = best_learn,
+                                 #    trees = tune(),
+                                     resamples = cv_folds,
+                                     grid = 10)
 
 doParallel::registerDoParallel() 
 
 system.time(
-  xgb_rs <- tune_grid(
-    xgb_workflow,
+  xgb_lhc_tune <- tune_grid(
+    xgb_spec_tune,
     resamples = cv_folds,
-    grid = xgb_lhc_grid,
-    metrics = metric_set(accuracy)          
+    grid = xgb_lhc_grid,        
   )
 )
 
@@ -227,12 +233,12 @@ system.time(
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                     Collect Metrics                                  ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-collect_metrics(xgb_tune) # get metrics from tuning cv to pick best model
+collect_metrics(xgb_lhc_tune) # get metrics from tuning cv to pick best model
 
-autoplot(xgb_tune) +      # plot cv results for parameter tuning
+autoplot(xgb_lhc_tune) +      # plot cv results for parameter tuning
   theme_bw()
 
-best_learn <- select_best(xgb_tune$learn_rate)
+best_learn <- select_best(xgb_tune)
 ```
 
 ### Tune Stochastic Parameters
@@ -270,7 +276,7 @@ xgb_workflow_tune
 ```{r}
 #use cross validation to tune mtry and treesfor 10 parameters combinations
 xgb_cv_tune = xgb_workflow_tune %>%
-  grid_latin_hypercube(mtry = tune(),
+  grid_latin_hypercube(lean_rate = tune(), #mry
                        resamples = cv_folds,
                        grid = 10) 
 
@@ -331,7 +337,7 @@ final_xgb_fit <- fit(xgb_final,
 test_predict_xgb <- predict(final_xgb_fit, eel_eval_dat) %>% 
   # bind to testing column
   bind_cols(eel_eval_dat) %>%  
-  mutate(genre = as.factor(DSDam))
+  mutate(Angaus = as.factor(Angaus))
 
 # get testing prediction probabilities
 test_predict_xgb2 <- predict(final_xgb_fit,
@@ -339,7 +345,7 @@ test_predict_xgb2 <- predict(final_xgb_fit,
                              type = "prob") %>% 
   # bind to testing column
 bind_cols(eel_eval_dat) %>%  
-  mutate(DSDam = as.factor(DSDam))
+  mutate(Angaus = as.factor(Angaus))
 ```
                      
                      
@@ -350,7 +356,7 @@ bind_cols(eel_eval_dat) %>%
 # ----                          Evaluate Model                              ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # get accuracy of testing prediction
-xgb_accuracy <- accuracy(test_predict_xgb, truth = DSDam, estimate = .pred_class) 
+xgb_accuracy <- accuracy(test_predict_xgb, truth = Angaus, estimate = .pred_class) 
 
 #xgb_accuracy
 ```
