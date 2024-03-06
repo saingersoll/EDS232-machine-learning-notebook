@@ -1,0 +1,380 @@
+---
+title: "Lab 6"
+author: "Sofia Ingersoll"
+date: "2023-03-01"
+output: html_document
+---
+
+## Case Study: Eel Distribution Modeling
+
+This week's lab follows a project modeling the eel species Anguilla australis described by Elith et al. (2008). There are two data sets for this lab.  You'll use one for training and evaluating your model, and you'll use your model to make predictions predictions on the other.  Then you'll compare your model's performance to the model used by Elith et al.
+
+## Set Up
+
+```{r echo = TRUE, message = FALSE}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         System Set Up                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+knitr::opts_chunk$set(echo = TRUE, message = FALSE#, warning = FALSE
+)
+
+library(here)          # easy file paths
+library(tidyverse)     # data wrangling
+library(tidymodels)    # modeling
+library(xgboost)       # package for boosted trees
+library(ranger)        # package for random forest non-default external package
+library(patchwork)
+
+set.seed(99)           # set random seed
+```
+
+## Data
+
+Grab the training and evaluation data sets (eel.model.data.csv, eel.eval.data.csv) from github here:
+https://github.com/MaRo406/eds-232-machine-learning/blob/main/data 
+
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Load Data                                    ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# read in eel model training data 
+train_data <- read_csv(here("data", "eel.model.data.csv"),
+                       show_col_types = FALSE) 
+
+# read in eel model eval data
+eval_dat <- read_csv(here("data", "eel.eval.data.csv"),
+                     show_col_types = FALSE) 
+```
+
+
+### Split and Resample
+
+Split the model data (eel.model.data.csv) into a training and test set, stratified by outcome score (Angaus). Use 10-fold CV to resample the training set.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Split Data                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# split the data stratified by Angaus
+train_split <- initial_split(train_data,
+                             strata = Angaus,
+                             prop = .8)
+
+# traing data
+train <- training(train_split)
+
+# testing data
+test <- testing(train_split)
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                       Cross Val Folds                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create 10 cv folds stratified by outcome score
+cv_folds <- vfold_cv(train, 
+                     v = 10,
+                     strata = Angaus)
+```
+
+### Preprocess
+
+Create a recipe to prepare your data for the XGBoost model
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Prep Data for Models                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create model recipe
+eel_recipe <- recipe(DSDam ~ .,
+                     data = train) %>%  
+  # remove these selected variables 
+  step_rm(Site) %>% 
+  # turn all categorical predictors to a binary variable using 0 or 1
+  step_integer(Method, zero_based = T) %>%
+  # create dummy variables from all factors
+  step_dummy(all_nominal_predictors()) %>%   
+  # normalize all numeric predictors
+  step_normalize(all_numeric_predictors())  
+```
+
+## Tuning XGBoost
+
+### Tune Learning Rate
+
+Following the XGBoost tuning strategy outlined in lecture, first we conduct tuning on just the learning rate parameter:
+
+1.  Create a model specification using {xgboost} for the estimation
+
+-   Only specify one parameter to tune()
+
+learn_rate is the rate that the algorithm adapts between each tree iteration
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                     Tuning for Learn Rate                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# creating a boosted tree and tuning for the hyperparam learn_rate
+xgb_spec <- boost_tree(learn_rate = tune(),
+                       trees = 3000#,
+                       #tree_depth = tune(),
+                       #min_n = tune(),
+                       #reduction_loss = tune()
+) %>% 
+  set_engine('xgboost') %>% 
+  set_mode('classification')
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Workflow                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create workflow
+xgb_workflow <- workflow() %>% # create workflow
+  add_model(xgb_spec) %>%     # add boosted trees model
+  add_recipe(eel_recipe)      # add recipe
+
+xgb_workflow
+```
+
+
+2.  Set up a grid to tune your model by using a range of learning rate parameter values: expand.grid(learn_rate = seq(0.0001, 0.3, length.out = 30))
+
+-   Use appropriate metrics argument(s) - Computational efficiency becomes a factor as models get more complex and data get larger. Record the time it takes to run. Do this for each tuning phase you run. You could use {tictoc} or Sys.time().
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Tune Grid                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+xgb_grid <- expand.grid(mtry = seq(0.0001, 0.3,
+                                   length.out = 30),
+                        trees = round(seq(50, 3000, length.out = 10)))
+
+doParallel::registerDoParallel() 
+
+system.time(
+  xgb_rs <- tune_grid(
+    xgb_workflow,
+    resamples = cv_folds,
+    grid = xgb_grid,
+    metrics = metric_set(accuracy)          
+  )
+)
+```
+
+3.  Show the performance of the best models and the estimates for the learning rate parameter values associated with each.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                     Collect Metrics                                  ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+collect_metrics(xgb_tune) # get metrics from tuning cv to pick best model
+
+autoplot(xgb_tune) +      # plot cv results for parameter tuning
+  theme_bw()
+
+best_learn <- select_best(xgb_tune$learn_rate)
+```
+
+
+### Tune Tree Parameters
+
+1.  Create a new specification where you set the learning rate (which you already optimized) and tune the tree parameters.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Tuning xgb                                 ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# creating a boosted tree 
+xgb_spec_tune <- boost_tree(learn_rate = best_learn,
+                            trees = tune(),
+                            tree_depth = tune(),
+                            min_n = tune()) %>% 
+  set_engine('xgboost') %>% 
+  set_mode('classification')
+
+# create workflow
+xgb_workflow_tune <- workflow() %>% 
+  add_model(xgb_spec_tune) %>% 
+  add_recipe(eel_recipe)
+
+xgb_workflow_tune
+```
+
+
+2.  Set up a tuning grid. This time use grid_latin_hypercube() to get a representative sampling of the parameter space
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Tune LHC Grid                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+xgb_lhc_grid <- grid_latin_hypercube(mtry = tune(),
+                                     trees = tune())
+
+doParallel::registerDoParallel() 
+
+system.time(
+  xgb_rs <- tune_grid(
+    xgb_workflow,
+    resamples = cv_folds,
+    grid = xgb_lhc_grid,
+    metrics = metric_set(accuracy)          
+  )
+)
+
+```
+
+
+3.  Show the performance of the best models and the estimates for the tree parameter values associated with each.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                     Collect Metrics                                  ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+collect_metrics(xgb_tune) # get metrics from tuning cv to pick best model
+
+autoplot(xgb_tune) +      # plot cv results for parameter tuning
+  theme_bw()
+
+best_learn <- select_best(xgb_tune$learn_rate)
+```
+
+### Tune Stochastic Parameters
+
+1.  Create a new specification where you set the learning rate and tree parameters (which you already optimized) and tune the stochastic parameters.
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----               Prep Data Tuning for Learn Rate                        ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# creating a boosted tree and tuning for the hyperparam learn_rate
+xgb_spec_tune <- boost_tree(learn_rate = tune(),
+                            trees = 3000,
+                            mtry = tune(),
+                            sample_size = tune()
+) %>% 
+  set_engine('xgboost') %>% 
+  set_mode('classification')
+
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                           Workflow                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create workflow
+xgb_workflow_tune <- workflow() %>% 
+  add_model(xgb_spec_tune) %>% 
+  add_recipe(eel_recipe)
+
+xgb_workflow_tune
+```
+
+
+2.  Set up a tuning grid. Use grid_latin_hypercube() again.
+
+```{r}
+#use cross validation to tune mtry and treesfor 10 parameters combinations
+xgb_cv_tune = xgb_workflow_tune %>%
+  grid_latin_hypercube(mtry = tune(),
+                       resamples = cv_folds,
+                       grid = 10) 
+
+doParallel::registerDoParallel() 
+
+system.time(
+  xgb_rs <- tune_grid(
+    xgb_workflow,
+    resamples = cv_folds,
+    grid = xgb_grid,
+    metrics = metric_set(accuracy)          
+  )
+)
+```
+
+
+3.  Show the performance of the best models and the estimates for the tree parameter values associated with each.
+
+```{r}
+collect_metrics(rf_cv_tune) #get metrics from tuning cv to pick best model
+
+autoplot(rf_cv_tune) + #plot cv results for parameter tuning
+  theme_bw()
+```
+
+
+## Finalize workflow and make final prediction
+
+1.  How well did your model perform? What types of errors did it make?
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+xgb_best <- show_best(xgb_cv_tune, n = 1, metric = c('rmse',"roc_auc")) # get metrics for best xgb model
+                     
+xgb_best
+                     
+xgb_final <- finalize_workflow(xgb_workflow,
+                               xgb_best)
+```
+                     
+                     
+## Fit your model the evaluation data and compare performance
+                     
+ 1.  Now used your final model to predict on the other dataset (eval.data.csv)
+
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# similar functions here.
+final_xgb_fit <- fit(xgb_final,
+                     data = eel_eval_dat)
+
+# get prediction for test 
+test_predict_xgb <- predict(final_xgb_fit, eel_eval_dat) %>% 
+  # bind to testing column
+  bind_cols(eel_eval_dat) %>%  
+  mutate(genre = as.factor(DSDam))
+
+# get testing prediction probabilities
+test_predict_xgb2 <- predict(final_xgb_fit,
+                             eel_eval_dat,
+                             type = "prob") %>% 
+  # bind to testing column
+bind_cols(eel_eval_dat) %>%  
+  mutate(DSDam = as.factor(DSDam))
+```
+                     
+                     
+2.  How does your model perform on this data?
+                       
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+xgb_accuracy <- accuracy(test_predict_xgb, truth = DSDam, estimate = .pred_class) 
+
+#xgb_accuracy
+```
+                     
+                     
+3.  How do your results compare to those of Elith et al.?
+                       
+-   Use {vip} to compare variable importance
+ -   What do your variable importance results tell you about the distribution of this eel species?
+                       
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# Visualize fit model
+final_xgb_fit %>% 
+  vip(geom = 'col',
+      aesthetics = list(fill = 'midnightblue'),
+      alpha = 0.8) +
+  scale_y_continuous(expand = c(0,0)) 
+```
+                     
+                     
