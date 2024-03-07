@@ -26,6 +26,7 @@ library(ranger)        # package for random forest non-default external package
 library(patchwork)
 library(parsnip)
 library(doParallel)  # for parallel backend to foreach
+library(dials)
 
 set.seed(99)           # set random seed
 ```
@@ -173,7 +174,7 @@ autoplot(xgb_cv_tune)  +      # plot cv results for parameter tuning
 
 best_learn <- show_best(xgb_cv_tune,
                         n = 1,
-                        metric = "roc_auc")
+                        metric = "accuracy")
 
 best_learn
 ```
@@ -188,11 +189,18 @@ best_learn
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # creating a boosted tree 
 xgb_spec_tune <- boost_tree(learn_rate = best_learn,
-                            trees = tune(),
+                            trees = 3000,
                             tree_depth = tune(),
-                            min_n = tune()) %>% 
+                            min_n = tune(),
+                            loss_reduction = tune()) %>% 
   set_engine('xgboost') %>% 
   set_mode('classification')
+
+
+# extract parameters
+xgb_params <- xgb_spec_tune %>% 
+  extract_parameter_set_dials()
+
 
 # create workflow
 xgb_workflow_tune <- workflow() %>% 
@@ -209,19 +217,12 @@ xgb_workflow_tune
 # ----                      Tune LHC Grid                                   ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # add lect 6 params
-xgb_lhc_grid <- grid_latin_hypercube(learn_rate = best_learn,
-                                 #    trees = tune(),
-                                     resamples = cv_folds,
-                                     grid = 10)
-
-doParallel::registerDoParallel() 
-
 system.time(
-  xgb_lhc_tune <- tune_grid(
-    xgb_spec_tune,
-    resamples = cv_folds,
-    grid = xgb_lhc_grid,        
-  )
+
+xgb_lhc_grid <- xgb_workflow_tune %>% 
+  tune_grid(resamples = cv_folds,
+            grid = grid_latin_hypercube(x = xgb_params, size = 10))
+
 )
 
 ```
@@ -233,12 +234,13 @@ system.time(
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                     Collect Metrics                                  ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-collect_metrics(xgb_lhc_tune) # get metrics from tuning cv to pick best model
+collect_metrics(xgb_lhc_grid) # get metrics from tuning cv to pick best model
 
-autoplot(xgb_lhc_tune) +      # plot cv results for parameter tuning
+autoplot(xgb_lhc_grid) +      # plot cv results for parameter tuning
   theme_bw()
 
-best_learn <- select_best(xgb_tune)
+best_grid <- select_best(xgb_lhc_grid,
+                        metric = "accuracy")
 ```
 
 ### Tune Stochastic Parameters
@@ -250,8 +252,13 @@ best_learn <- select_best(xgb_tune)
 # ----               Prep Data Tuning for Learn Rate                        ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # creating a boosted tree and tuning for the hyperparam learn_rate
-xgb_spec_tune <- boost_tree(learn_rate = tune(),
+xgb_spec_tune <- boost_tree(learn_rate = best_learn,
                             trees = 3000,
+                            
+                            tree_depth =best_grid$tree_depth,
+                            min_n = best_grid$min_n,
+                            loss_reduction = best_grid$loss_reduction,
+
                             mtry = tune(),
                             sample_size = tune()
 ) %>% 
@@ -268,28 +275,28 @@ xgb_workflow_tune <- workflow() %>%
   add_recipe(eel_recipe)
 
 xgb_workflow_tune
+
+# extract parameters
+xgb_wkfl_tune <- xgb_spec_tune %>% 
+  extract_parameter_dials()
 ```
 
 
 2.  Set up a tuning grid. Use grid_latin_hypercube() again.
 
 ```{r}
-#use cross validation to tune mtry and treesfor 10 parameters combinations
-xgb_cv_tune = xgb_workflow_tune %>%
-  grid_latin_hypercube(lean_rate = tune(), #mry
-                       resamples = cv_folds,
-                       grid = 10) 
-
-doParallel::registerDoParallel() 
-
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                      Tune LHC Grid                                   ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# add lect 6 params
 system.time(
-  xgb_rs <- tune_grid(
-    xgb_workflow,
-    resamples = cv_folds,
-    grid = xgb_grid,
-    metrics = metric_set(accuracy)          
-  )
+
+xgb_lhc_grid <- xgb_workflow_tune %>% 
+  tune_grid(resamples = cv_folds,
+            grid = grid_latin_hypercube(x = xgb_params, size = 10))
+
 )
+
 ```
 
 
@@ -312,7 +319,7 @@ autoplot(rf_cv_tune) + #plot cv results for parameter tuning
 # ----                         Finalize Workflow                            ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-xgb_best <- show_best(xgb_cv_tune, n = 1, metric = c('rmse',"roc_auc")) # get metrics for best xgb model
+xgb_best <- show_best(xgb_cv_tune, n = 1, metric = "accuracu") # get metrics for best xgb model
                      
 xgb_best
                      
