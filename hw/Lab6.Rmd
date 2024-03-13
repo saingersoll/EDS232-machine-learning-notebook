@@ -27,6 +27,8 @@ library(patchwork)
 library(parsnip)
 library(doParallel)  # for parallel backend to foreach
 library(dials)
+library(gt)
+library(vip)
 
 set.seed(99)           # set random seed
 ```
@@ -45,7 +47,8 @@ https://github.com/MaRo406/eds-232-machine-learning/blob/main/data
 train_data <- read_csv(here("data", "eel.model.data.csv"),
                        show_col_types = FALSE) %>% 
   mutate(Angaus = as.factor(Angaus)) %>% 
-  mutate(Method = as.factor(Method))
+  mutate(Method = as.factor(Method)) %>% 
+  select(-Site)
 
 # read in eel model eval data
 eval_dat <- read_csv(here("data", "eel.eval.data.csv"),
@@ -95,8 +98,6 @@ Create a recipe to prepare your data for the XGBoost model
 # create model recipe
 eel_recipe <- recipe(Angaus ~ .,
                      data = train) %>%  
-  # remove these selected variables 
-  step_rm(Site) %>% 
   # create dummy variables from all factors
   step_dummy(all_nominal_predictors()) %>%   
   # normalize all numeric predictors
@@ -174,9 +175,11 @@ autoplot(xgb_cv_tune)  +      # plot cv results for parameter tuning
 
 best_learn <- show_best(xgb_cv_tune,
                         n = 1,
-                        metric = "accuracy")
-
-best_learn
+                        metric = "accuracy") 
+# display pretty table
+show_best(xgb_cv_tune,
+                        n = 1,
+                        metric = "accuracy")  %>% gt()
 ```
 
 ### Tune Tree Parameters
@@ -239,74 +242,80 @@ collect_metrics(xgb_lhc_grid) # get metrics from tuning cv to pick best model
 autoplot(xgb_lhc_grid) +      # plot cv results for parameter tuning
   theme_bw()
 
-best_grid <- select_best(xgb_lhc_grid,
-                        metric = "accuracy")
+# display pretty table
+ select_best(xgb_lhc_grid,
+                        metric = "accuracy") %>% gt()
 ```
 
 ### Tune Stochastic Parameters
 
 1.  Create a new specification where you set the learning rate and tree parameters (which you already optimized) and tune the stochastic parameters.
-
 ```{r}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----               Prep Data Tuning for Learn Rate                        ----
+# ----                   Prep Data Tuned Params                             ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# creating a boosted tree and tuning for the hyperparam learn_rate
-xgb_spec_tune <- boost_tree(learn_rate = best_learn,
-                            trees = 3000,
-                            
-                            tree_depth =best_grid$tree_depth,
-                            min_n = best_grid$min_n,
-                            loss_reduction = best_grid$loss_reduction,
+# isolate best value for tree parameters
+best_grid <- select_best(xgb_lhc_grid,
+                        metric = "accuracy")
+best_min_n <- as.numeric(best_grid$min_n)
+best_tree_depth <- as.numeric(best_grid$tree_depth)
+best_loss_reduction <- as.numeric(best_grid$loss_reduction)
 
-                            mtry = tune(),
-                            sample_size = tune()
-) %>% 
-  set_engine('xgboost') %>% 
-  set_mode('classification')
+# create updated specifications
+xgb_spec_tuned <- boost_tree(learn_rate = best_learn,
+                        trees = 3000,
+                        tree_depth = best_tree_depth,
+                        min_n = best_min_n,
+                        loss_reduction = best_loss_reduction,
+                        
+                        mtry = tune(),
+                        sample_size = tune()) %>% 
+  set_engine("xgboost", nthread = 2) %>% 
+  set_mode("classification")
 
+# isolate parameters
+xgb_param <- xgb_spec_tuned %>% extract_parameter_set_dials()
 
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                           Workflow                                   ----
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# create workflow
-xgb_workflow_tune <- workflow() %>% 
-  add_model(xgb_spec_tune) %>% 
+# create workflow with updated specs
+xgb_workflow_tuned <- workflow() %>% 
+  add_model(xgb_spec_tuned) %>% 
   add_recipe(eel_recipe)
 
-xgb_workflow_tune
-
-# extract parameters
-xgb_wkfl_tune <- xgb_spec_tune %>% 
-  extract_parameter_dials()
 ```
 
 
 2.  Set up a tuning grid. Use grid_latin_hypercube() again.
 
 ```{r}
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                      Tune LHC Grid                                   ----
+# ----               Tune with latin-hyper-cube                             ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# add lect 6 params
+
 system.time(
-
-xgb_lhc_grid <- xgb_workflow_tune %>% 
-  tune_grid(resamples = cv_folds,
-            grid = grid_latin_hypercube(x = xgb_params, size = 10))
-
+  
+  xgb_cv_tuned <- xgb_workflow_tuned %>% 
+    tune_grid(resamples = cv_folds,
+              grid = grid_latin_hypercube(finalize(xgb_param, x = train),
+                size = 10))
 )
-
 ```
 
 
 3.  Show the performance of the best models and the estimates for the tree parameter values associated with each.
 
 ```{r}
-collect_metrics(rf_cv_tune) #get metrics from tuning cv to pick best model
+collect_metrics(xgb_cv_tuned) #get metrics from tuning cv to pick best model
 
-autoplot(rf_cv_tune) + #plot cv results for parameter tuning
+autoplot(xgb_cv_tuned) + #plot cv results for parameter tuning
   theme_bw()
+
+
+best_tune <- select_best(xgb_cv_tuned,
+                        metric = "accuracy")
+# display pretty table
+ select_best(xgb_cv_tuned,
+             metric = "accuracy") %>% gt()
 ```
 
 
@@ -314,17 +323,32 @@ autoplot(rf_cv_tune) + #plot cv results for parameter tuning
 
 1.  How well did your model perform? What types of errors did it make?
 
+The model had ~83% accuracy when predicting. 
+
 ```{r}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                         Finalize Workflow                            ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-xgb_best <- show_best(xgb_cv_tune, n = 1, metric = "accuracu") # get metrics for best xgb model
+xgb_best <- show_best(xgb_cv_tuned, n = 1, metric = "accuracy") # get metrics for best xgb model
+
                      
-xgb_best
-                     
-xgb_final <- finalize_workflow(xgb_workflow,
-                               xgb_best)
+xgb_final <-finalize_workflow(xgb_workflow_tuned, select_best(xgb_cv_tuned, metric = "accuracy"))
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# fit the model to the training data
+xgb_fit <- fit(xgb_final, train)
+
+# make final prediction using test data
+eel_predict <- predict(object = xgb_fit, new_data = test) %>% 
+  bind_cols(test)
+
+# collect and view metrics
+metrics <- as.data.frame(accuracy(eel_predict, truth = Angaus,
+                                  estimate = .pred_class))
+metrics %>% gt()
+
 ```
                      
                      
@@ -334,38 +358,26 @@ xgb_final <- finalize_workflow(xgb_workflow,
 
 ```{r}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                             Fit Model                                ----
+#----                         Predict on Eval Data                          ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# similar functions here.
-final_xgb_fit <- fit(xgb_final,
-                     data = eel_eval_dat)
+# make predictions using model and evaluation data
+eval_eel_predict <- predict(object = xgb_fit, new_data = eval_dat) %>% 
+  bind_cols(eval_dat)
 
-# get prediction for test 
-test_predict_xgb <- predict(final_xgb_fit, eel_eval_dat) %>% 
-  # bind to testing column
-  bind_cols(eel_eval_dat) %>%  
-  mutate(Angaus = as.factor(Angaus))
 
-# get testing prediction probabilities
-test_predict_xgb2 <- predict(final_xgb_fit,
-                             eel_eval_dat,
-                             type = "prob") %>% 
-  # bind to testing column
-bind_cols(eel_eval_dat) %>%  
-  mutate(Angaus = as.factor(Angaus))
 ```
                      
                      
 2.  How does your model perform on this data?
                        
 ```{r}
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# ----                          Evaluate Model                              ----
-#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-# get accuracy of testing prediction
-xgb_accuracy <- accuracy(test_predict_xgb, truth = Angaus, estimate = .pred_class) 
-
-#xgb_accuracy
+## ==================================================
+##               2. Model Performance            ----
+## ==================================================
+# collect and view metrics
+metrics_final <- as.data.frame(accuracy(eval_eel_predict, truth = Angaus,
+                                  estimate = .pred_class))
+metrics_final %>% gt()
 ```
                      
                      
@@ -373,17 +385,17 @@ xgb_accuracy <- accuracy(test_predict_xgb, truth = Angaus, estimate = .pred_clas
                        
 -   Use {vip} to compare variable importance
  -   What do your variable importance results tell you about the distribution of this eel species?
+ 
+Running the predictions on the evaluation data, a slight decrease in accuracy of about ~1% was observed in thepredictions for the testing data. This is similar to the Elith et al., the two most important factors were summer air temperature (SegSumT) and proportion of area within indigenous forest (USNative). After these two, the variable importance for the model was different than the importance proposed by Elith et al.Â Based on the similarities in variable importance.
                        
 ```{r}
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                        Visual of Fit Model                          ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Visualize fit model
-final_xgb_fit %>% 
+xgb_fit %>% 
   vip(geom = 'col',
-      aesthetics = list(fill = 'midnightblue'),
-      alpha = 0.8) +
-  scale_y_continuous(expand = c(0,0)) 
+      aesthetics = list(fill = 'midnightblue')) 
 ```
                      
                      
