@@ -75,8 +75,8 @@ svm_linear_fit %>%
 ```{r tune}
 #As usual we want to tune our hyperparameter values
 svm_linear_wf <- workflow() %>%
-  add_model(svm_linear_spec %>%
-  set_args(cost_tune())) %>%
+  add_model(svm_linear_spec) %>%
+  set_args(cost_tune()) %>%
   add_formula(y~.)
 
 set.seed(1234)

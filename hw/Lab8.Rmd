@@ -20,11 +20,16 @@ You task is build both an SVM and a random forest model and compare their perfor
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE)
 
+library(doParallel) 
 library(tidymodels)
 library(tidyverse)
+library(patchwork)
 library(kernlab)
 library(ranger) 
+library(dials)
 library(here)
+library(vip)
+library(gt)
 
 set.seed(99)
 ```
@@ -100,16 +105,14 @@ recipe <- recipe(cover_type ~., data = train) %>%
   # normalize all numeric predictors
   # centers and scales the numeric predictors,
   # making step_center() and step_scale() redundant
-  step_normalize(all_numeric_predictors())# %>% 
- # step_center(all_predictors()) %>%
- # step_scale(all_predictors())
+  step_normalize(all_numeric_predictors())
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # ----                         SVM Model Spec                               ----
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 # Create non-linear SVM model specification
-svm_rbf_spec <- svm_rbf() %>%
+svm_rbf_spec <- svm_rbf(cost = tune()) %>%
   set_mode("classification") %>%
   set_engine("kernlab")
 
@@ -117,9 +120,8 @@ svm_rbf_spec <- svm_rbf() %>%
 #Bundle into workflow
 svm_workflow <- workflow() %>%
   add_recipe(recipe) %>%
-  add_model(svm_rbf_spec)
-
-# Fit model 
+  add_model(svm_rbf_spec %>% 
+  set_args(cost_tune()))
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -136,8 +138,6 @@ rf_spec <- rand_forest(mtry = tune(),
 rf_workflow <- workflow() %>% 
   add_model(rf_spec) %>% 
   add_recipe(recipe)
-
-# Fit model 
 ```
 
 
@@ -150,6 +150,7 @@ rf_workflow <- workflow() %>%
 # create 5 cv folds stratified by outcome score
 cv_folds <- vfold_cv(train, 
                      v = 5,
+                     strata = cover_type
                      )
 ```
 
@@ -157,16 +158,24 @@ cv_folds <- vfold_cv(train,
 4.  Tune the models. Choose appropriate parameters and grids. If the computational costs of tuning given your strategy are prohibitive, how might you work around this?
 
 ```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                    SVM Cross Validation                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# create a grid to tune across
 param_grid <- grid_regular(cost(),
                            levels = 5)
 
-tune_res <- tune_grid(
-  svm_linear_wf,
-  resamples = sim_data_fold,
-  grid = param_grid
+
+doParallel::registerDoParallel() 
+
+system.time(
+  svm_cv_tune <- tune_grid(
+    svm_workflow,
+    resamples = cv_folds,
+    grid = param_grid
+  )
 )
 
-autoplot(tune_res)
 
 
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -193,7 +202,139 @@ system.time(
 -   Which type of model do you think is better for this task?
 -   Why do you speculate this is the case?
 
-```{r}
 
+### SMV
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# store the best tuning metrics
+svm_best <- show_best(svm_cv_tune, n = 1, metric = "roc_auc")
+
+# finalize workflow
+svm_final <-  finalize_workflow(svm_workflow,
+                               svm_best)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# similar functions here.
+
+# fit the KNN model to the training set
+train_fit_svm <- fit(svm_final, train) 
+
+# get prediction for test 
+test_predict_svm = predict(train_fit_svm, 
+                          test) %>% 
+  # bind to testing column
+  bind_cols(test) 
+
+# get testing prediction probabilities
+test_predict2_svm = predict(train_fit_svm,
+                           test,
+                           type = "prob") %>% 
+  # bind to testing column
+  bind_cols(test) 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+svm_accuracy <- accuracy(test_predict_svm, 
+                        truth = cover_type,
+                        estimate = .pred_class) 
+
+test_predict_svm_num <- as.numeric(test_predict_svm$cover_type) %>% 
+  as.numeric(test_predict_svm$.pred_class)
+           
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize model
+
+# create confusion matrix
+svm_cm <- test_predict_svm %>% 
+  conf_mat(truth = cover_type,
+           estimate = .pred_class) %>% 
+  # plot confusion matrix with heatmap
+  autoplot(type = "heatmap") + 
+  
+  # change theme
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 0,
+                                   hjust=1)) +
+  #rotate axis labels
+  labs(title = "SVM")
+```
+
+###  RF
+```{r}
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                         Finalize Workflow                            ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# store the best tuning metrics
+rf_best <- show_best(rf_cv_tune, n = 1, metric = "roc_auc")
+
+# finalize workflow
+rf_final <-  finalize_workflow(rf_workflow,
+                               rf_best)
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                             Fit Model                                ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# similar functions here.
+
+# fit the KNN model to the training set
+train_fit_rf <- fit(rf_final, train) 
+
+# get prediction for test 
+test_predict_rf = predict(train_fit_rf, 
+                          test) %>% 
+  # bind to testing column
+  bind_cols(test) 
+
+# get testing prediction probabilities
+test_predict2_rf = predict(train_fit_rf,
+                           test,
+                           type = "prob") %>% 
+  # bind to testing column
+  bind_cols(test) 
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                          Evaluate Model                              ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# get accuracy of testing prediction
+rf_accuracy <- accuracy(test_predict_rf, 
+                        truth = cover_type,
+                        estimate = .pred_class) 
+
+test_predict_rf_num <- as.numeric(test_predict_rf$cover_type) %>% 
+  as.numeric(test_predict_rf$.pred_class)
+           
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# ----                        Visual of Fit Model                          ----
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+# visualize model
+
+# create confusion matrix
+rf_cm <- test_predict_rf %>% 
+  conf_mat(truth = cover_type,
+           estimate = .pred_class) %>% 
+  # plot confusion matrix with heatmap
+  autoplot(type = "heatmap") + 
+  
+  # change theme
+  theme_bw() + 
+  theme(axis.text.x = element_text(angle = 0,
+                                   hjust=1)) +
+  #rotate axis labels
+  labs(title = "Random Forest")
+```
+
+### Comparing Predictions of SVM to RF
+
+In the confusion matrix below, a greater number of accurate predictions were made by the random forest model. It is because of this, I think is random forest is better for this task. It took rough 30 seconds longer computationally, which is an acceptable cost.
+```{r fig.width=12, fig.height=6}
+svm_cm + rf_cm
 ```
 
